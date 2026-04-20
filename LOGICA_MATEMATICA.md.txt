@@ -1,0 +1,39 @@
+# Lógica Matemática y Algoritmos Nutricionales
+
+## 1. Cálculo del Metabolismo Basal (TMB)
+El sistema utilizará la ecuación de Mifflin-St Jeor para determinar la Tasa Metabólica Basal (las calorías que el cuerpo necesita para sobrevivir en reposo), basándose en los datos recogidos en el Onboarding (`profiles`).
+
+Para hombres:
+$$TMB = 10 \times \text{Peso (kg)} + 6.25 \times \text{Altura (cm)} - 5 \times \text{Edad (años)} + 5$$
+
+Para mujeres:
+$$TMB = 10 \times \text{Peso (kg)} + 6.25 \times \text{Altura (cm)} - 5 \times \text{Edad (años)} - 161$$
+
+## 2. Gasto Energético Total Diario (TDEE)
+Para calcular las calorías reales que quema el usuario, la TMB se multiplicará por un Factor de Actividad (FA). Este factor se extrae de las respuestas del usuario sobre su estilo de vida y días de entrenamiento:
+
+* **Sedentario** (Poco o ningún ejercicio): TMB x 1.2
+* **Ligeramente activo** (Ejercicio ligero 1-3 días/semana): TMB x 1.375
+* **Moderadamente activo** (Ejercicio moderado 3-5 días/semana): TMB x 1.55
+* **Muy activo** (Ejercicio fuerte 6-7 días/semana): TMB x 1.725
+* **Atleta** (Entrenamiento profesional/doble turno): TMB x 1.9
+
+## 3. Ajuste según el Objetivo Físico
+Una vez obtenido el TDEE, el sistema ajustará automáticamente las Kcal diarias objetivo (`objetivo_kcal` en la base de datos) aplicando los siguientes modificadores:
+
+* **Déficit Calórico (Pérdida de grasa):** Se restará un 15% al TDEE.
+* **Mantenimiento:** El objetivo será igual al TDEE.
+* **Superávit Calórico (Hipertrofia/Ganancia muscular):** Se sumará un 10% al TDEE.
+
+## 4. Distribución de Macronutrientes
+Con las Kcal objetivo calculadas, el algoritmo repartirá los macronutrientes priorizando la preservación o creación de masa muscular (estándar de nutrición deportiva):
+
+1. **Proteínas:** Se fijan en 2.0 g por cada kg de peso corporal. 
+   *(Cálculo de kcal: Gramos de proteína x 4)*
+2. **Grasas:** Se fijan en 1.0 g por cada kg de peso corporal.
+   *(Cálculo de kcal: Gramos de grasa x 9)*
+3. **Carbohidratos:** El resto de calorías sobrantes se destina a los carbohidratos.
+   *(Cálculo en gramos: Kcal restantes divididas entre 4)*
+
+## 5. Dinamismo Día a Día (Interconexión con Rutinas)
+* Si el día actual está marcado como "Día de Descanso" en el módulo de Rutinas, los Carbohidratos se reducirán ligeramente y se compensarán con Grasas, manteniendo el límite calórico, para adaptar la falta de glucólisis por el entrenamiento.

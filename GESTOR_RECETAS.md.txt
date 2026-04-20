@@ -1,0 +1,32 @@
+# Documentación Funcional: Gestor de Recetas y Biblioteca
+
+## 1. Pantalla Principal: Exploración y Búsqueda
+Esta pantalla actúa como el "hub" central de alimentación del usuario, diseñada con componentes modernos de Material Design 3 (MD3) en Jetpack Compose para evitar la sobrecarga visual.
+
+* **Cabecera (Search Bar):** * Barra de búsqueda anclada en la parte superior.
+  * Permite buscar entre las +100 recetas predefinidas en la base de datos mediante filtrado por ingrediente principal o título.
+* **Sección "Mis Favoritas / Guardadas" (LazyRow):**
+  * Carrusel horizontal en la parte superior (justo debajo del buscador).
+  * **Diseño visual:** Tarjetas cuadradas/rectangulares estilo "post de Instagram" (imagen de alta calidad ocupando la mayor parte, título y macros superpuestos en un gradiente inferior).
+  * **Elemento final:** La última tarjeta del `LazyRow` será un botón dinámico de "Ver más..." que navegará a la vista completa de la biblioteca personal.
+* **Resultados de Búsqueda y Feed (LazyColumn):**
+  * Lista vertical para mostrar las recetas disponibles.
+  * **Diseño visual (List Card):** Tarjetas apaisadas (imagen en el lado izquierdo, título, kcal y tiempo de preparación a la derecha).
+  * **Interacción:** Icono de "Guardar" (marcapáginas) superpuesto en la esquina de la imagen para añadirla directamente a la biblioteca personal con un solo toque (y retroalimentación háptica/animación).
+
+## 2. Biblioteca Personal (Gestión de Recetas)
+Pantalla dedicada a la gestión de las recetas que el usuario ha guardado o creado.
+
+* **Organización:** Lista de recetas guardadas con soporte para gestos (Swipe-to-delete para borrar).
+* **Fijado (Pin):** Opción de marcar recetas como "Fijadas" (Pin) para que aparezcan siempre al principio de la biblioteca y en el `LazyRow` de la pantalla principal.
+
+## 3. Módulo de Creación e Importación Avanzada
+Accesible a través de un Botón de Acción Flotante (Extended FAB) con el texto "Añadir Receta", que despliega un menú inferior (Bottom Sheet) con tres opciones de creación:
+
+* **Creación Manual:** * Formulario estructurado para introducir título, foto, ingredientes y macros.
+* **Importación Inteligente por Imagen (OCR):**
+  * Integración con la cámara del dispositivo (usando herramientas como Google ML Kit Text Recognition).
+  * Permite fotografiar la página de un libro de recetas físico o una etiqueta. El sistema extraerá el texto, identificando ingredientes y pasos para rellenar el formulario de forma automática.
+* **Importación por URL (Web Scraping):**
+  * Campo de texto para pegar el enlace de un blog de cocina o web de recetas.
+  * El sistema analizará los metadatos de la URL (usando librerías como Jsoup) para extraer el título, la imagen principal y los ingredientes automáticamente.

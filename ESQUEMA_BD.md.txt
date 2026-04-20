@@ -1,0 +1,68 @@
+# Esquema de Base de Datos (Supabase / PostgreSQL)
+
+## 1. Tabla: `profiles` (Usuarios)
+*Extiende la tabla de autenticación nativa de Supabase (`auth.users`).*
+* `id` (UUID, Primary Key): Vinculado directamente al usuario autenticado.
+* `nombre` (Text): Nombre real.
+* `apodo` (Text): Nombre de usuario a mostrar en la interfaz.
+* `edad` (Integer).
+* `altura_cm` (Integer): Guardado siempre en centímetros.
+* `peso_kg` (Float): Guardado siempre en kilogramos (Single Source of Truth).
+* `preferencia_sistema` (Text): 'metrico' (kg/cm) o 'imperial' (lb/ft). Define cómo se le muestran los datos en la app.
+* `sexo` (Text): 'Masculino', 'Femenino'.
+* `creado_en` (Timestamp).
+
+## 2. Tabla: `progress_photos` (Tracking Físico Opcional)
+*Almacena las referencias de las imágenes guardadas en el Storage de Supabase.*
+* `id` (UUID, Primary Key).
+* `user_id` (UUID, Foreign Key -> `profiles.id`).
+* `foto_frontal_url` (Text).
+* `foto_trasera_url` (Text).
+* `foto_perfil_url` (Text).
+* `fecha_registro` (Date).
+
+## 3. Tabla: `recipes` (Gestor de Recetas)
+* `id` (UUID, Primary Key).
+* `user_id` (UUID, Foreign Key -> `profiles.id`): Creador de la receta.
+* `titulo` (Text).
+* `kcal_totales` (Integer).
+* `proteinas_g` (Float).
+* `carbos_g` (Float).
+* `grasas_g` (Float).
+* `ingredientes` (JSONB o Text): Array de ingredientes.
+
+## 4. Tabla: `daily_macros` (Calculadora Dietética Diaria)
+*Registra el cuadre nutricional del usuario día a día.*
+* `id` (UUID, Primary Key).
+* `user_id` (UUID, Foreign Key -> `profiles.id`).
+* `fecha` (Date).
+* `objetivo_kcal` (Integer).
+* `consumido_kcal` (Integer).
+* `consumido_proteinas` (Float).
+* `consumido_carbos` (Float).
+* `consumido_grasas` (Float).
+
+## 5. Tabla: `exercises_master` (Diccionario de Ejercicios)
+*Catálogo general del que bebe el algoritmo para montar rutinas.*
+* `id` (UUID, Primary Key).
+* `nombre` (Text).
+* `grupo_muscular` (Text): Ej. Pecho, Espalda, Cuádriceps.
+* `equipamiento` (Text): Ej. Máquina, Peso Libre, Calistenia.
+* `nivel` (Text): Principiante, Intermedio, Avanzado.
+
+## 6. Tabla: `user_routines` (Rutinas Generadas)
+*Cabecera del plan de entrenamiento del usuario.*
+* `id` (UUID, Primary Key).
+* `user_id` (UUID, Foreign Key -> `profiles.id`).
+* `objetivo` (Text): Déficit, Mantenimiento, Superávit.
+* `dias_semana` (Integer).
+* `activa` (Boolean): Indica si es el plan vigente.
+
+## 7. Tabla: `routine_days` (Detalle de la Rutina)
+*Cruza la rutina del usuario con los ejercicios concretos asignados a cada día.*
+* `id` (UUID, Primary Key).
+* `routine_id` (UUID, Foreign Key -> `user_routines.id`).
+* `dia_numero` (Integer): Ej. 1, 2, 3...
+* `exercise_id` (UUID, Foreign Key -> `exercises_master.id`).
+* `series` (Integer).
+* `repeticiones` (Text): Ej. "10-12" o "Al fallo".

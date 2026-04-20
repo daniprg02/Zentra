@@ -1,0 +1,32 @@
+# Documentación Funcional: Calculadora Dietética Inteligente
+
+## 1. Dashboard Principal (Resumen Diario)
+La cabecera de la pantalla actuará como el panel de control del usuario, mostrando el progreso diario en tiempo real mediante componentes visuales de Material Design 3.
+
+* **Anillo de Progreso Calórico (`CircularProgressIndicator`):**
+  * Gráfico circular central que muestra las Kcal consumidas frente a las Kcal objetivo del día.
+  * **Feedback Visual (Color Dinámico):** El anillo cambiará de color intuitivamente (ej. Verde -> Naranja -> Rojo) si el usuario se acerca o supera el límite calórico establecido.
+* **Desglose de Macronutrientes:**
+  * Tres barras de progreso lineales (`LinearProgressIndicator`) justo debajo del anillo central, dedicadas a Proteínas (g), Carbohidratos (g) y Grasas (g).
+  * Se actualizarán de forma reactiva cada vez que se añada un alimento o receta.
+
+## 2. Sistema de Registro de Ingestas (Slots)
+Para reducir la fricción de uso, la interfaz huirá de listas vacías y presentará un esquema estructurado del día.
+
+* **Bloques de Comida:** Interfaz compuesta por ~7 "Slots" o tarjetas vacías predefinidas (Desayuno, Almuerzo, Comida, Merienda, Cena, Pre-entreno, Post-entreno).
+* **Interacción:** Al pulsar sobre un slot vacío, se desplegará un panel inferior (`BottomSheet`) que ofrecerá dos vías rápidas de registro:
+  1. **Añadir desde Mis Recetas:** Conexión directa con el módulo de recetas del usuario. Con un solo toque, se volcarán todos los macros de una receta guardada al slot correspondiente.
+  2. **Búsqueda Manual:** Barra de búsqueda para ingredientes individuales.
+
+## 3. Integración de API Externa (Búsqueda Manual)
+Para evitar que el usuario deba introducir valores nutricionales a mano y dotar al sistema de fiabilidad técnica:
+
+* **Conexión con API Nutricional:** Se implementará una llamada a una API externa (ej. OpenFoodFacts o Edamam) mediante la librería `Retrofit` en Kotlin.
+* **Normalización de Datos:** El sistema tratará las cadenas de texto del usuario (ej. convirtiendo "ManZana" a "manzana") antes de lanzar la petición HTTP.
+* **Resultados:** La API devolverá información estandarizada (Kcal por 100g, proteínas, grasas, hidratos), permitiendo al usuario simplemente indicar la cantidad en gramos para que la app realice la regla de tres automáticamente.
+
+## 4. Interconexión de Módulos (El Cerebro de la App)
+El verdadero valor de la aplicación reside en la comunicación constante entre sus tres pilares, gestionada a través de una arquitectura MVVM (Model-View-ViewModel).
+
+* **Sincronización con "Rutinas":** El gasto calórico total diario (TDEE) no será estático. El sistema leerá la `Masterlist` de rutinas del usuario; si hoy es un "Día de Entrenamiento", el anillo de progreso calórico sumará automáticamente las calorías extra que el usuario necesita quemar/recuperar. Si es "Día de Descanso", el objetivo calórico será más restrictivo.
+* **Sincronización con "Recetas":** Cualquier modificación que el usuario haga en el módulo de Recetas (ej. cambiar los ingredientes de su "Tortilla Favorita") se reflejará instantáneamente en la base de datos, asegurando que la próxima vez que la añada a la calculadora, los macros estén actualizados.
