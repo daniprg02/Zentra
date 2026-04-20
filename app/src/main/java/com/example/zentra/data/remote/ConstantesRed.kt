@@ -13,10 +13,10 @@ package com.example.zentra.data.remote
 object ConstantesRed {
 
     // TODO: Introduce la URL de tu proyecto de Supabase (ej. https://abcdefghij.supabase.co)
-    const val SUPABASE_URL = "https://TU_PROYECTO.supabase.co"
+    const val SUPABASE_URL = "https://pjqrzbpdjlhexhwarcrh.supabase.co"
 
     // TODO: Introduce tu clave pública (anon) de Supabase
-    const val SUPABASE_ANON_KEY = "TU_ANON_KEY_AQUI"
+    const val SUPABASE_ANON_KEY = "sb_publishable_A7ltf_8aBVpPfzGO_M5Mtg_sLiYn8LA"
 
     // OpenFoodFacts es una API pública y gratuita, no requiere autenticación
     const val API_NUTRICIONAL_BASE_URL = "https://world.openfoodfacts.org/"

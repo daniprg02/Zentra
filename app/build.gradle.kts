@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt.android)
@@ -8,14 +9,12 @@ plugins {
 
 android {
     namespace = "com.example.zentra"
-    compileSdk {
-        version = release(36)
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.zentra"
         minSdk = 34
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -53,7 +52,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
-    // --- Compose BOM: gestiona versiones de todo el ecosistema Compose ---
+    // --- Compose BOM ---
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
@@ -61,36 +60,30 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
 
-    // --- Navegación Compose ---
+    // --- Navegación ---
     implementation(libs.navigation.compose)
-
-    // --- ViewModel en Compose ---
     implementation(libs.lifecycle.viewmodel.compose)
-
-    // --- Coroutines ---
-    implementation(libs.kotlinx.coroutines.android)
 
     // --- DI: Hilt ---
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.hilt.navigation.compose)
 
-    // --- Supabase (Backend + Auth + Storage) ---
+    // --- Supabase ---
     implementation(platform(libs.supabase.bom))
     implementation(libs.supabase.postgrest)
     implementation(libs.supabase.auth)
     implementation(libs.supabase.storage)
-    // Motor HTTP que usa Supabase bajo el capó
     implementation(libs.ktor.client.android)
 
-    // --- Retrofit + OkHttp (API nutricional externa) ---
+    // --- Retrofit ---
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 
-    // --- Serialización Kotlin (DTOs de Supabase) ---
+    // --- Serialización ---
     implementation(libs.kotlinx.serialization.json)
 
     // --- Tests ---
