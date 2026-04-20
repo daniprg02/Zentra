@@ -20,14 +20,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.zentra.ui.screens.auth.PantallaLogin
+import com.example.zentra.ui.screens.auth.PantallaOnboarding
 import com.example.zentra.ui.screens.calculadora.PantallaCalculadora
 import com.example.zentra.ui.screens.recetas.PantallaRecetas
 import com.example.zentra.ui.screens.rutinas.PantallaRutinas
+import com.example.zentra.ui.screens.splash.PantallaSplash
 
 /**
- * Define el grafo de navegación principal de la aplicación.
- * Gestiona la transición entre la pantalla de login y las tres secciones principales,
- * mostrando la barra de navegación inferior únicamente en las pantallas del menú principal.
+ * Grafo de navegación principal de Zentra.
+ * Arranca en el Splash, que verifica la sesión y redirige automáticamente.
+ * La barra de navegación inferior solo se muestra en los tres módulos principales.
  */
 @Composable
 fun GrafoNavegacion() {
@@ -35,7 +37,6 @@ fun GrafoNavegacion() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val rutaActual = navBackStackEntry?.destination?.route
 
-    // Rutas en las que se muestra la barra de navegación inferior
     val rutasPrincipales = listOf(
         Destinos.Rutinas.ruta,
         Destinos.Calculadora.ruta,
@@ -45,46 +46,71 @@ fun GrafoNavegacion() {
     Scaffold(
         bottomBar = {
             if (rutaActual in rutasPrincipales) {
-                BarraNavegacionInferior(
-                    navController = navController,
-                    rutaActual = rutaActual
-                )
+                BarraNavegacionInferior(navController = navController, rutaActual = rutaActual)
             }
         }
     ) { paddingValues ->
         NavHost(
             navController = navController,
-            startDestination = Destinos.Login.ruta,
+            startDestination = Destinos.Splash.ruta,
             modifier = Modifier.padding(paddingValues)
         ) {
+            // Splash: punto de entrada, comprueba sesión y redirige
+            composable(Destinos.Splash.ruta) {
+                PantallaSplash(
+                    onNavegacionLogin = {
+                        navController.navigate(Destinos.Login.ruta) {
+                            popUpTo(Destinos.Splash.ruta) { inclusive = true }
+                        }
+                    },
+                    onNavegacionOnboarding = {
+                        navController.navigate(Destinos.Onboarding.ruta) {
+                            popUpTo(Destinos.Splash.ruta) { inclusive = true }
+                        }
+                    },
+                    onNavegacionPrincipal = {
+                        navController.navigate(Destinos.Rutinas.ruta) {
+                            popUpTo(Destinos.Splash.ruta) { inclusive = true }
+                        }
+                    }
+                )
+            }
+
+            // Login: autenticación con email/contraseña
             composable(Destinos.Login.ruta) {
                 PantallaLogin(
-                    onLoginExitoso = {
-                        // Al autenticarse, navegamos al módulo principal eliminando el login del stack
+                    onLoginConPerfil = {
                         navController.navigate(Destinos.Rutinas.ruta) {
+                            popUpTo(Destinos.Login.ruta) { inclusive = true }
+                        }
+                    },
+                    onLoginSinPerfil = {
+                        navController.navigate(Destinos.Onboarding.ruta) {
                             popUpTo(Destinos.Login.ruta) { inclusive = true }
                         }
                     }
                 )
             }
-            composable(Destinos.Rutinas.ruta) {
-                PantallaRutinas()
+
+            // Onboarding: wizard de alta de datos físicos del usuario
+            composable(Destinos.Onboarding.ruta) {
+                PantallaOnboarding(
+                    onPerfilGuardado = {
+                        navController.navigate(Destinos.Rutinas.ruta) {
+                            popUpTo(Destinos.Onboarding.ruta) { inclusive = true }
+                        }
+                    }
+                )
             }
-            composable(Destinos.Calculadora.ruta) {
-                PantallaCalculadora()
-            }
-            composable(Destinos.Recetas.ruta) {
-                PantallaRecetas()
-            }
+
+            // Menú principal: tres módulos con barra de navegación inferior
+            composable(Destinos.Rutinas.ruta) { PantallaRutinas() }
+            composable(Destinos.Calculadora.ruta) { PantallaCalculadora() }
+            composable(Destinos.Recetas.ruta) { PantallaRecetas() }
         }
     }
 }
 
-/**
- * Barra de navegación inferior con los tres módulos principales de Zentra.
- * @param navController Controlador de navegación para gestionar los saltos entre tabs.
- * @param rutaActual Ruta en pantalla para marcar el tab seleccionado.
- */
 @Composable
 private fun BarraNavegacionInferior(
     navController: NavController,
@@ -99,18 +125,12 @@ private fun BarraNavegacionInferior(
     NavigationBar {
         elementos.forEach { elemento ->
             NavigationBarItem(
-                icon = {
-                    Icon(
-                        imageVector = elemento.icono,
-                        contentDescription = elemento.etiqueta
-                    )
-                },
-                label = { Text(text = elemento.etiqueta) },
+                icon = { Icon(elemento.icono, contentDescription = elemento.etiqueta) },
+                label = { Text(elemento.etiqueta) },
                 selected = rutaActual == elemento.ruta,
                 onClick = {
                     if (rutaActual != elemento.ruta) {
                         navController.navigate(elemento.ruta) {
-                            // Mantenemos un único elemento en el back stack del tab raíz
                             popUpTo(Destinos.Rutinas.ruta) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
@@ -122,9 +142,6 @@ private fun BarraNavegacionInferior(
     }
 }
 
-/**
- * Modelo interno que representa un elemento de la barra de navegación inferior.
- */
 private data class ElementoNavegacion(
     val ruta: String,
     val etiqueta: String,

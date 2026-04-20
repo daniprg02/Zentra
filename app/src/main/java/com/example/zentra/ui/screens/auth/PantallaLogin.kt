@@ -7,42 +7,77 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.zentra.ui.theme.ZentraTheme
+import com.example.zentra.ui.screens.auth.LoginViewModel.EstadoLogin
+import com.example.zentra.ui.screens.auth.LoginViewModel.ModoLogin
 
 /**
  * Pantalla de autenticación de Zentra.
- * Muestra el logo de la app, un acceso principal con Google y una opción secundaria con email.
- * TODO: Integrar animación Lottie en la cabecera (splash/logo animado).
- * @param onLoginExitoso Callback invocado cuando la autenticación se completa con éxito.
+ * Permite al usuario iniciar sesión o registrarse con email y contraseña.
+ * Alterna entre ambos modos con un botón inferior sin necesidad de navegar a otra pantalla.
+ *
+ * @param onLoginConPerfil Callback cuando el usuario se autentica y ya tiene perfil completo.
+ * @param onLoginSinPerfil Callback cuando el usuario se autentica pero aún no tiene perfil.
  */
 @Composable
 fun PantallaLogin(
-    onLoginExitoso: () -> Unit,
+    onLoginConPerfil: () -> Unit,
+    onLoginSinPerfil: () -> Unit,
     viewModel: LoginViewModel = hiltViewModel()
 ) {
-    val estado by viewModel.estadoLogin.collectAsState()
+    val estado by viewModel.estado.collectAsState()
+    val modo by viewModel.modo.collectAsState()
+    val focusManager = LocalFocusManager.current
 
-    // Navegamos al menú principal en cuanto el login es exitoso
+    var email by rememberSaveable { mutableStateOf("") }
+    var contrasena by rememberSaveable { mutableStateOf("") }
+    var contrasenaVisible by remember { mutableStateOf(false) }
+
+    // Navegamos al destino correcto cuando la autenticación es exitosa
     LaunchedEffect(estado) {
-        if (estado is LoginViewModel.EstadoLogin.Exitoso) {
-            onLoginExitoso()
+        when (estado) {
+            is EstadoLogin.ExitosoConPerfil -> onLoginConPerfil()
+            is EstadoLogin.ExitosoSinPerfil -> onLoginSinPerfil()
+            else -> {}
         }
     }
 
@@ -50,14 +85,16 @@ fun PantallaLogin(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
+            .imePadding()
             .padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Nombre de la aplicación como placeholder del logo/Lottie
+        // Cabecera con el nombre de la app
         Text(
             text = "ZENTRA",
-            style = MaterialTheme.typography.displayLarge,
+            style = MaterialTheme.typography.displayMedium,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Black
         )
@@ -65,68 +102,117 @@ fun PantallaLogin(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Entrena. Nutre. Evoluciona.",
-            style = MaterialTheme.typography.bodyMedium,
+            text = if (modo == ModoLogin.INICIAR_SESION) "Bienvenido de nuevo" else "Crea tu cuenta",
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(72.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
-        // Botón principal de acceso: Google OAuth
+        // Campo: Email
+        OutlinedTextField(
+            value = email,
+            onValueChange = { email = it },
+            label = { Text("Email") },
+            leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Email,
+                imeAction = ImeAction.Next
+            ),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(FocusDirection.Down) }
+            ),
+            enabled = estado !is EstadoLogin.Cargando
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Campo: Contraseña
+        OutlinedTextField(
+            value = contrasena,
+            onValueChange = { contrasena = it },
+            label = { Text("Contraseña") },
+            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+            trailingIcon = {
+                IconButton(onClick = { contrasenaVisible = !contrasenaVisible }) {
+                    Icon(
+                        imageVector = if (contrasenaVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (contrasenaVisible) "Ocultar contraseña" else "Mostrar contraseña"
+                    )
+                }
+            },
+            visualTransformation = if (contrasenaVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    focusManager.clearFocus()
+                    if (modo == ModoLogin.INICIAR_SESION) viewModel.iniciarSesion(email, contrasena)
+                    else viewModel.registrarse(email, contrasena)
+                }
+            ),
+            enabled = estado !is EstadoLogin.Cargando
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Botón principal de acción
         Button(
-            onClick = { viewModel.iniciarSesionConGoogle() },
+            onClick = {
+                focusManager.clearFocus()
+                if (modo == ModoLogin.INICIAR_SESION) viewModel.iniciarSesion(email, contrasena)
+                else viewModel.registrarse(email, contrasena)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
             shape = RoundedCornerShape(12.dp),
-            enabled = estado !is LoginViewModel.EstadoLogin.Cargando
+            enabled = estado !is EstadoLogin.Cargando
         ) {
-            Text(
-                text = "Continuar con Google",
-                style = MaterialTheme.typography.labelLarge
-            )
+            if (estado is EstadoLogin.Cargando) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text(
+                    text = if (modo == ModoLogin.INICIAR_SESION) "Iniciar sesión" else "Registrarse",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Botón secundario: Email/Contraseña
-        OutlinedButton(
-            onClick = { viewModel.iniciarSesionConEmail("test@zentra.app", "temporal") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            enabled = estado !is LoginViewModel.EstadoLogin.Cargando
-        ) {
+        // Mensaje de error
+        if (estado is EstadoLogin.Error) {
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Entrar con Email",
-                style = MaterialTheme.typography.labelLarge
+                text = (estado as EstadoLogin.Error).mensaje,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Indicadores de estado de la operación
-        when (val estadoActual = estado) {
-            is LoginViewModel.EstadoLogin.Cargando -> {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            }
-            is LoginViewModel.EstadoLogin.Error -> {
-                Text(
-                    text = estadoActual.mensaje,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            else -> {}
+        // Enlace para alternar entre login y registro
+        TextButton(onClick = { viewModel.toggleModo() }) {
+            Text(
+                text = if (modo == ModoLogin.INICIAR_SESION)
+                    "¿No tienes cuenta? Regístrate"
+                else
+                    "¿Ya tienes cuenta? Inicia sesión",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun PrevisualizacionPantallaLogin() {
-    ZentraTheme(temaOscuro = true) {
-        PantallaLogin(onLoginExitoso = {})
     }
 }
