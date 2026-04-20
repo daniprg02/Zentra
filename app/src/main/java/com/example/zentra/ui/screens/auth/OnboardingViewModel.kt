@@ -124,7 +124,7 @@ class OnboardingViewModel @Inject constructor(
                     pesoKg = f.pesoKg.toFloat(),
                     preferenciaSistema = f.preferenciaSistema,
                     sexo = f.sexo,
-                    creadoEn = ""  // Supabase aplica el valor por defecto (now()) en la BD
+                    creadoEn = null  // null → Supabase aplica el DEFAULT now() de la columna
                 )
                 Log.d("OnboardingViewModel", "Guardando perfil para el usuario: $userId")
                 perfilRepositorio.guardarPerfil(perfil).getOrThrow()

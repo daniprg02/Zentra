@@ -24,5 +24,6 @@ data class Perfil(
     val pesoKg: Float,
     val preferenciaSistema: String,
     val sexo: String,
-    val creadoEn: String
+    // Nullable porque lo rellena Supabase automáticamente con now() al insertar
+    val creadoEn: String?
 )

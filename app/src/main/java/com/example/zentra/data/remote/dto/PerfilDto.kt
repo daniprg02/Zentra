@@ -19,7 +19,9 @@ data class PerfilDto(
     @SerialName("peso_kg") val pesoKg: Float = 0f,
     @SerialName("preferencia_sistema") val preferenciaSistema: String = "metrico",
     val sexo: String = "",
-    @SerialName("creado_en") val creadoEn: String = ""
+    // Nullable: si enviamos null, Supabase aplica el DEFAULT now() de la columna.
+    // Enviar "" (vacío) causaría un error de parseo en PostgreSQL al intentar convertirlo a timestamp.
+    @SerialName("creado_en") val creadoEn: String? = null
 ) {
     /** Convierte este DTO al modelo de dominio [Perfil]. */
     fun asDominio() = Perfil(
@@ -45,5 +47,5 @@ fun Perfil.asDto() = PerfilDto(
     pesoKg = pesoKg,
     preferenciaSistema = preferenciaSistema,
     sexo = sexo,
-    creadoEn = creadoEn
+    creadoEn = creadoEn  // null → Supabase usa DEFAULT now(); valor real → lo preserva al hacer update
 )
