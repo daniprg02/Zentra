@@ -84,7 +84,22 @@ class LoginViewModel @Inject constructor(
                     this.email = email.trim()
                     this.password = contrasena
                 }
-                Log.d("LoginViewModel", "Registro correcto. Redirigiendo al Onboarding.")
+
+                // signUpWith crea la cuenta pero, si la confirmación de email está habilitada
+                // en Supabase, NO establece una sesión activa en el cliente.
+                // Para garantizar que hay sesión antes de ir al Onboarding, hacemos signIn
+                // explícito si currentUserOrNull() sigue siendo null.
+                if (supabase.auth.currentUserOrNull() == null) {
+                    Log.d("LoginViewModel", "signUpWith completado sin sesión. Intentando signIn explícito...")
+                    supabase.auth.signInWith(Email) {
+                        this.email = email.trim()
+                        this.password = contrasena
+                    }
+                }
+
+                val userId = supabase.auth.currentUserOrNull()?.id
+                    ?: throw Exception("No se pudo establecer la sesión tras el registro. Comprueba si la confirmación de email está desactivada en Supabase.")
+                Log.d("LoginViewModel", "Registro y sesión establecidos correctamente para: $userId")
                 _estado.value = EstadoLogin.ExitosoSinPerfil
             } catch (e: Exception) {
                 Log.e("LoginViewModel", "Error al registrarse: ${e.message}")
