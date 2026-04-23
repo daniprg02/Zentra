@@ -3,9 +3,11 @@ package com.example.zentra.di
 import com.example.zentra.data.repository.MacrosRepositorioImpl
 import com.example.zentra.data.repository.PerfilRepositorioImpl
 import com.example.zentra.data.repository.RecetasRepositorioImpl
+import com.example.zentra.data.repository.RutinasRepositorioImpl
 import com.example.zentra.domain.repository.IMacrosRepositorio
 import com.example.zentra.domain.repository.IPerfilRepositorio
 import com.example.zentra.domain.repository.IRecetasRepositorio
+import com.example.zentra.domain.repository.IRutinasRepositorio
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -47,4 +49,13 @@ abstract class ModuloRepositorios {
     abstract fun bindMacrosRepositorio(
         impl: MacrosRepositorioImpl
     ): IMacrosRepositorio
+
+    /**
+     * Vincula [IRutinasRepositorio] con su implementación [RutinasRepositorioImpl].
+     */
+    @Binds
+    @Singleton
+    abstract fun bindRutinasRepositorio(
+        impl: RutinasRepositorioImpl
+    ): IRutinasRepositorio
 }

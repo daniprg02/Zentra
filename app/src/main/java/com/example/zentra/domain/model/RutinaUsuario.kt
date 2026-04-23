@@ -15,5 +15,6 @@ data class RutinaUsuario(
     val userId: String,
     val objetivo: String,
     val diasSemana: Int,
-    val activa: Boolean
+    val activa: Boolean,
+    val creadaEn: String? = null
 )
