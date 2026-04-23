@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.calculadora
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.remote.api.OpenFoodFactsService
 import com.example.zentra.domain.model.MacrosDiarios
 import com.example.zentra.domain.model.NivelActividad
 import com.example.zentra.domain.model.ObjetivoFisico
@@ -14,6 +15,8 @@ import com.example.zentra.domain.repository.IRecetasRepositorio
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,22 +29,25 @@ import javax.inject.Inject
  * ViewModel del módulo de Calculadora Dietética.
  *
  * Responsabilidades:
- * - Cargar el perfil físico del usuario desde Supabase.
- * - Calcular el objetivo calórico diario mediante Mifflin-St Jeor → TDEE → ajuste por objetivo.
- * - Distribuir los macronutrientes según los estándares de nutrición deportiva.
- * - Leer y crear el registro diario en `daily_macros`, y actualizarlo cuando se añaden ingestas.
- * - Gestionar el picker de recetas para los slots de ingesta.
+ * - Cargar el perfil físico del usuario y calcular el objetivo calórico diario.
+ * - Leer y crear el registro `daily_macros` de la fecha visualizada.
+ * - Gestionar los slots de ingesta: añadir y eliminar recetas con actualización optimista.
+ * - Navegar entre fechas y bloquear la edición al consultar días anteriores (modo historial).
+ * - Buscar alimentos en la API pública de OpenFoodFacts con debounce de 700 ms.
  */
 @HiltViewModel
 class CalculadoraViewModel @Inject constructor(
     private val supabase: SupabaseClient,
     private val perfilRepositorio: IPerfilRepositorio,
     private val macrosRepositorio: IMacrosRepositorio,
-    private val recetasRepositorio: IRecetasRepositorio
+    private val recetasRepositorio: IRecetasRepositorio,
+    private val foodService: OpenFoodFactsService
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(EstadoCalculadora())
     val estado: StateFlow<EstadoCalculadora> = _estado.asStateFlow()
+
+    private var busquedaJob: Job? = null
 
     init {
         Log.d("CalculadoraViewModel", "ViewModel inicializado. Cargando datos nutricionales del día.")
@@ -49,9 +55,8 @@ class CalculadoraViewModel @Inject constructor(
     }
 
     /**
-     * Carga o recalcula todos los datos de la pantalla.
-     * Obtiene el perfil, calcula los objetivos con la configuración actual y lee (o crea)
-     * el registro nutricional de hoy en Supabase. Preserva las ingestas en memoria del turno actual.
+     * Carga o recalcula todos los datos de la pantalla para la fecha actualmente seleccionada.
+     * En modo historial no crea un registro nuevo si el día no tiene datos registrados.
      */
     fun cargarDatosDelDia() {
         viewModelScope.launch {
@@ -69,25 +74,43 @@ class CalculadoraViewModel @Inject constructor(
                     objetivo = _estado.value.objetivo
                 )
 
-                val hoy = LocalDate.now().toString()
-                val macrosExistentes = macrosRepositorio.obtenerMacrosDelDia(userId, hoy).getOrNull()
+                val fecha = _estado.value.fechaVisualizando
+                val esModoHistorial = _estado.value.esModoHistorial
+                val macrosExistentes = macrosRepositorio.obtenerMacrosDelDia(userId, fecha).getOrNull()
 
-                val macrosHoy = macrosExistentes ?: run {
-                    Log.d("CalculadoraViewModel", "Sin registro para $hoy. Creando fila inicial en daily_macros.")
-                    val nuevo = MacrosDiarios(
-                        id = UUID.randomUUID().toString(),
-                        userId = userId,
-                        fecha = hoy,
-                        objetivoKcal = objetivos.objetivoKcal,
-                        consumidoKcal = 0,
-                        consumidoProteinasG = 0f,
-                        consumidoCarbosG = 0f,
-                        consumidoGrasasG = 0f
-                    )
-                    macrosRepositorio.guardarMacrosDelDia(nuevo).onFailure { e ->
-                        Log.e("CalculadoraViewModel", "Error al crear registro inicial: ${e.message}")
+                val macrosHoy = when {
+                    macrosExistentes != null -> macrosExistentes
+                    !esModoHistorial -> {
+                        Log.d("CalculadoraViewModel", "Sin registro para $fecha. Creando fila inicial en daily_macros.")
+                        val nuevo = MacrosDiarios(
+                            id = UUID.randomUUID().toString(),
+                            userId = userId,
+                            fecha = fecha,
+                            objetivoKcal = objetivos.objetivoKcal,
+                            consumidoKcal = 0,
+                            consumidoProteinasG = 0f,
+                            consumidoCarbosG = 0f,
+                            consumidoGrasasG = 0f
+                        )
+                        macrosRepositorio.guardarMacrosDelDia(nuevo).onFailure { e ->
+                            Log.e("CalculadoraViewModel", "Error al crear registro inicial: ${e.message}")
+                        }
+                        nuevo
                     }
-                    nuevo
+                    else -> {
+                        // Día pasado sin datos: mostramos ceros sin crear fila en BD
+                        Log.d("CalculadoraViewModel", "Modo historial: sin registro para $fecha. Mostrando ceros.")
+                        MacrosDiarios(
+                            id = "",
+                            userId = userId,
+                            fecha = fecha,
+                            objetivoKcal = objetivos.objetivoKcal,
+                            consumidoKcal = 0,
+                            consumidoProteinasG = 0f,
+                            consumidoCarbosG = 0f,
+                            consumidoGrasasG = 0f
+                        )
+                    }
                 }
 
                 _estado.value = _estado.value.copy(
@@ -113,23 +136,61 @@ class CalculadoraViewModel @Inject constructor(
         }
     }
 
-    /** Abre el picker de recetas para el slot indicado. Carga la biblioteca si aún no está en memoria. */
+    // ─── Navegación de fechas ──────────────────────────────────────────────────
+
+    /**
+     * Cambia la fecha visualizada y recarga los datos.
+     * Si la fecha es anterior a hoy activa el modo historial (solo lectura).
+     */
+    fun cambiarFecha(fecha: LocalDate) {
+        val esHistorial = fecha.isBefore(LocalDate.now())
+        _estado.value = _estado.value.copy(
+            fechaVisualizando = fecha.toString(),
+            esModoHistorial = esHistorial,
+            ingestasDelDia = emptyMap(),
+            busquedaTexto = "",
+            resultadosBusqueda = emptyList(),
+            buscandoAlimento = false
+        )
+        cargarDatosDelDia()
+        Log.d("CalculadoraViewModel", "Fecha cambiada a $fecha. Historial=$esHistorial")
+    }
+
+    /** Vuelve a mostrar los datos del día de hoy saliendo del modo historial. */
+    fun volverAHoy() {
+        cambiarFecha(LocalDate.now())
+    }
+
+    // ─── Gestión de slots ─────────────────────────────────────────────────────
+
+    /** Abre el picker de recetas para el slot indicado. El modo historial bloquea esta acción. */
     fun abrirSlot(nombreSlot: String) {
-        _estado.value = _estado.value.copy(slotActivo = nombreSlot)
+        if (_estado.value.esModoHistorial) return
+        _estado.value = _estado.value.copy(
+            slotActivo = nombreSlot,
+            busquedaTexto = "",
+            resultadosBusqueda = emptyList(),
+            buscandoAlimento = false
+        )
         if (_estado.value.recetasDisponibles.isEmpty()) {
             cargarRecetasParaPicker()
         }
     }
 
-    /** Cierra el picker de recetas sin añadir nada. */
+    /** Cierra el picker de recetas y limpia el estado de búsqueda. */
     fun cerrarSlot() {
-        _estado.value = _estado.value.copy(slotActivo = null)
+        busquedaJob?.cancel()
+        _estado.value = _estado.value.copy(
+            slotActivo = null,
+            busquedaTexto = "",
+            resultadosBusqueda = emptyList(),
+            buscandoAlimento = false
+        )
     }
 
     /**
-     * Añade una receta al slot activo, suma sus macros a los totales del día y
-     * persiste los nuevos totales en Supabase de forma reactiva.
-     * @param receta La receta seleccionada por el usuario en el picker.
+     * Añade una receta (propia o resultado de búsqueda) al slot activo,
+     * suma sus macros a los totales del día y persiste en Supabase.
      */
     fun agregarRecetaASlot(receta: Receta) {
         viewModelScope.launch {
@@ -142,27 +203,26 @@ class CalculadoraViewModel @Inject constructor(
             val nuevosCarbos = estadoActual.consumidoCarbosG + receta.carbosG
             val nuevasGrasas = estadoActual.consumidoGrasasG + receta.grasasG
 
-            // Actualizamos el mapa de ingestas en memoria para reflejar el slot
             val mapaActualizado = estadoActual.ingestasDelDia.toMutableMap()
             mapaActualizado[slotNombre] = (mapaActualizado[slotNombre] ?: emptyList()) + receta
 
-            // Actualización optimista: la UI responde antes de confirmar con Supabase
             _estado.value = estadoActual.copy(
                 consumidoKcal = nuevoKcal,
                 consumidoProteinasG = nuevasProteinas,
                 consumidoCarbosG = nuevosCarbos,
                 consumidoGrasasG = nuevasGrasas,
                 ingestasDelDia = mapaActualizado,
-                slotActivo = null
+                slotActivo = null,
+                busquedaTexto = "",
+                resultadosBusqueda = emptyList()
             )
 
             Log.d("CalculadoraViewModel", "Receta '${receta.titulo}' añadida a '$slotNombre'. Total: $nuevoKcal kcal.")
 
-            // Persistimos los nuevos totales acumulados en daily_macros
             val macrosActualizados = MacrosDiarios(
                 id = estadoActual.macrosDiariosId,
                 userId = userId,
-                fecha = LocalDate.now().toString(),
+                fecha = estadoActual.fechaVisualizando,
                 objetivoKcal = estadoActual.objetivoKcal,
                 consumidoKcal = nuevoKcal,
                 consumidoProteinasG = nuevasProteinas,
@@ -170,10 +230,90 @@ class CalculadoraViewModel @Inject constructor(
                 consumidoGrasasG = nuevasGrasas
             )
             macrosRepositorio.guardarMacrosDelDia(macrosActualizados).onFailure { e ->
-                Log.e("CalculadoraViewModel", "Error al persistir macros del día tras añadir receta: ${e.message}")
+                Log.e("CalculadoraViewModel", "Error al persistir macros tras añadir receta: ${e.message}")
             }
         }
     }
+
+    /**
+     * Elimina una receta de un slot, resta sus macros de los totales del día
+     * y actualiza el registro en Supabase.
+     */
+    fun eliminarRecetaDeSlot(nombreSlot: String, receta: Receta) {
+        viewModelScope.launch {
+            val estadoActual = _estado.value
+            val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
+
+            val mapaActualizado = estadoActual.ingestasDelDia.toMutableMap()
+            val listaActualizada = (mapaActualizado[nombreSlot] ?: emptyList())
+                .toMutableList().also { it.remove(receta) }
+            if (listaActualizada.isEmpty()) mapaActualizado.remove(nombreSlot)
+            else mapaActualizado[nombreSlot] = listaActualizada
+
+            val nuevoKcal = (estadoActual.consumidoKcal - receta.kcalTotales).coerceAtLeast(0)
+            val nuevasProteinas = (estadoActual.consumidoProteinasG - receta.proteinasG).coerceAtLeast(0f)
+            val nuevosCarbos = (estadoActual.consumidoCarbosG - receta.carbosG).coerceAtLeast(0f)
+            val nuevasGrasas = (estadoActual.consumidoGrasasG - receta.grasasG).coerceAtLeast(0f)
+
+            _estado.value = estadoActual.copy(
+                consumidoKcal = nuevoKcal,
+                consumidoProteinasG = nuevasProteinas,
+                consumidoCarbosG = nuevosCarbos,
+                consumidoGrasasG = nuevasGrasas,
+                ingestasDelDia = mapaActualizado
+            )
+
+            Log.d("CalculadoraViewModel", "Receta '${receta.titulo}' eliminada de '$nombreSlot'. Total: $nuevoKcal kcal.")
+
+            val macrosActualizados = MacrosDiarios(
+                id = estadoActual.macrosDiariosId,
+                userId = userId,
+                fecha = estadoActual.fechaVisualizando,
+                objetivoKcal = estadoActual.objetivoKcal,
+                consumidoKcal = nuevoKcal,
+                consumidoProteinasG = nuevasProteinas,
+                consumidoCarbosG = nuevosCarbos,
+                consumidoGrasasG = nuevasGrasas
+            )
+            macrosRepositorio.guardarMacrosDelDia(macrosActualizados).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al persistir macros tras eliminar receta: ${e.message}")
+            }
+        }
+    }
+
+    // ─── Búsqueda OpenFoodFacts ────────────────────────────────────────────────
+
+    /**
+     * Actualiza el texto de búsqueda y lanza la petición a OpenFoodFacts
+     * con un debounce de 700 ms para evitar llamadas en cada pulsación de tecla.
+     */
+    fun actualizarBusqueda(query: String) {
+        _estado.value = _estado.value.copy(busquedaTexto = query, resultadosBusqueda = emptyList())
+        busquedaJob?.cancel()
+        if (query.isBlank()) {
+            _estado.value = _estado.value.copy(buscandoAlimento = false)
+            return
+        }
+        busquedaJob = viewModelScope.launch {
+            delay(700L)
+            _estado.value = _estado.value.copy(buscandoAlimento = true)
+            try {
+                val respuesta = foodService.buscarProductos(query)
+                val recetas = respuesta.products
+                    ?.mapNotNull { it.aReceta() }
+                    ?.distinctBy { it.titulo.lowercase() }
+                    ?.take(10)
+                    ?: emptyList()
+                Log.d("CalculadoraViewModel", "${recetas.size} alimentos encontrados para '$query'.")
+                _estado.value = _estado.value.copy(resultadosBusqueda = recetas, buscandoAlimento = false)
+            } catch (e: Exception) {
+                Log.e("CalculadoraViewModel", "Error buscando '$query' en OpenFoodFacts: ${e.message}")
+                _estado.value = _estado.value.copy(buscandoAlimento = false)
+            }
+        }
+    }
+
+    // ─── Configuración nutricional ────────────────────────────────────────────
 
     /** Cambia el nivel de actividad y recalcula los objetivos del día. */
     fun cambiarNivelActividad(nivel: NivelActividad) {
@@ -189,7 +329,7 @@ class CalculadoraViewModel @Inject constructor(
         cargarDatosDelDia()
     }
 
-    /** Carga la biblioteca de recetas del usuario para mostrarlas en el picker de slots. */
+    /** Carga la biblioteca de recetas del usuario para mostrarlas en el picker. */
     private fun cargarRecetasParaPicker() {
         viewModelScope.launch {
             _estado.value = _estado.value.copy(cargandoRecetas = true)
@@ -206,13 +346,8 @@ class CalculadoraViewModel @Inject constructor(
     }
 
     /**
-     * Calcula el objetivo calórico diario y la distribución de macronutrientes.
-     *
-     * Proceso:
-     * 1. TMB → Fórmula Mifflin-St Jeor diferenciada por sexo.
-     * 2. TDEE → TMB × factor de actividad.
-     * 3. Objetivo calórico → TDEE ajustado según el modificador del objetivo físico.
-     * 4. Macros → 2g proteína/kg, 1g grasa/kg; el resto en carbohidratos.
+     * Calcula el objetivo calórico y la distribución de macros.
+     * TMB (Mifflin-St Jeor) → TDEE → ajuste por objetivo → macros (2g prot/kg, 1g grasa/kg).
      */
     private fun calcularObjetivosNutricionales(
         perfil: Perfil,
@@ -252,7 +387,6 @@ class CalculadoraViewModel @Inject constructor(
 
 /**
  * Estado completo de la pantalla de Calculadora Dietética.
- * Los totales consumidos se actualizan en tiempo real a medida que el usuario añade ingestas.
  */
 data class EstadoCalculadora(
     val cargando: Boolean = true,
@@ -269,10 +403,15 @@ data class EstadoCalculadora(
     val consumidoProteinasG: Float = 0f,
     val consumidoCarbosG: Float = 0f,
     val consumidoGrasasG: Float = 0f,
-    // Nombre del slot cuyo picker está abierto; null = picker cerrado
     val slotActivo: String? = null,
     val recetasDisponibles: List<Receta> = emptyList(),
     val cargandoRecetas: Boolean = false,
-    // Mapa en memoria de recetas añadidas por slot en la sesión actual (no persiste entre aperturas)
-    val ingestasDelDia: Map<String, List<Receta>> = emptyMap()
+    val ingestasDelDia: Map<String, List<Receta>> = emptyMap(),
+    // Navegación de fechas (modo historial = solo lectura)
+    val fechaVisualizando: String = java.time.LocalDate.now().toString(),
+    val esModoHistorial: Boolean = false,
+    // Búsqueda de alimentos en OpenFoodFacts
+    val busquedaTexto: String = "",
+    val resultadosBusqueda: List<Receta> = emptyList(),
+    val buscandoAlimento: Boolean = false
 )

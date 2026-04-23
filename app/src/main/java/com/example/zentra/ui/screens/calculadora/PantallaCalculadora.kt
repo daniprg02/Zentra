@@ -26,6 +26,8 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LocalCafe
 import androidx.compose.material.icons.outlined.Restaurant
@@ -34,21 +36,32 @@ import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,15 +72,16 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.zentra.domain.model.NivelActividad
 import com.example.zentra.domain.model.ObjetivoFisico
 import com.example.zentra.domain.model.Receta
-import com.example.zentra.ui.theme.ZentraTheme
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -85,8 +99,9 @@ private val SLOTS_DEL_DIA = listOf(
 
 /**
  * Pantalla principal del módulo de Calculadora Dietética.
- * Muestra el panel de progreso calórico diario, el desglose de macronutrientes,
- * los slots de ingestas del día y el picker de recetas para cada slot.
+ * Muestra el panel de progreso calórico diario, los macronutrientes,
+ * la navegación de fechas con modo historial (solo lectura) y
+ * el picker de recetas + búsqueda en OpenFoodFacts para cada slot.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,11 +120,13 @@ fun PantallaCalculadora(
             estado = estado,
             onObjetivoSeleccionado = viewModel::cambiarObjetivo,
             onNivelActividadSeleccionado = viewModel::cambiarNivelActividad,
-            onSlotClick = viewModel::abrirSlot
+            onSlotClick = viewModel::abrirSlot,
+            onEliminarReceta = viewModel::eliminarRecetaDeSlot,
+            onCambiarFecha = viewModel::cambiarFecha,
+            onVolverAHoy = viewModel::volverAHoy
         )
     }
 
-    // El picker de recetas se renderiza fuera del when para cubrir toda la pantalla
     if (estado.slotActivo != null) {
         ModalBottomSheet(
             onDismissRequest = viewModel::cerrarSlot,
@@ -118,8 +135,16 @@ fun PantallaCalculadora(
             PickerRecetasParaSlot(
                 nombreSlot = estado.slotActivo!!,
                 recetas = estado.recetasDisponibles,
+                ingestasActuales = estado.ingestasDelDia[estado.slotActivo!!] ?: emptyList(),
                 cargando = estado.cargandoRecetas,
-                onRecetaSeleccionada = viewModel::agregarRecetaASlot
+                busquedaTexto = estado.busquedaTexto,
+                resultadosBusqueda = estado.resultadosBusqueda,
+                buscandoAlimento = estado.buscandoAlimento,
+                onRecetaSeleccionada = viewModel::agregarRecetaASlot,
+                onEliminarIngesta = { receta ->
+                    viewModel.eliminarRecetaDeSlot(estado.slotActivo!!, receta)
+                },
+                onActualizarBusqueda = viewModel::actualizarBusqueda
             )
         }
     }
@@ -127,136 +152,232 @@ fun PantallaCalculadora(
 
 // ─── Contenido principal ──────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ContenidoCalculadora(
     estado: EstadoCalculadora,
     onObjetivoSeleccionado: (ObjetivoFisico) -> Unit,
     onNivelActividadSeleccionado: (NivelActividad) -> Unit,
-    onSlotClick: (String) -> Unit
+    onSlotClick: (String) -> Unit,
+    onEliminarReceta: (String, Receta) -> Unit,
+    onCambiarFecha: (LocalDate) -> Unit,
+    onVolverAHoy: () -> Unit
 ) {
-    val fechaHoy = LocalDate.now()
-        .format(DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("es", "ES")))
-        .replaceFirstChar { it.uppercase() }
+    var mostrarDatePicker by remember { mutableStateOf(false) }
 
-    // Colores resueltos antes del Canvas para poder usarlos dentro del DrawScope
+    val fechaObj = LocalDate.parse(estado.fechaVisualizando)
+    val esHoy = fechaObj == LocalDate.now()
+    val fechaFormateada = if (esHoy) {
+        "Hoy · " + fechaObj.format(DateTimeFormatter.ofPattern("d 'de' MMMM", Locale("es", "ES")))
+    } else {
+        fechaObj.format(DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", Locale("es", "ES")))
+            .replaceFirstChar { it.uppercase() }
+    }
+
+    // Colores resueltos fuera del Canvas
     val colorPrimario = MaterialTheme.colorScheme.primary
     val colorSecundario = MaterialTheme.colorScheme.secondary
     val colorTerciario = MaterialTheme.colorScheme.tertiary
     val colorError = MaterialTheme.colorScheme.error
     val colorSuperficieVariante = MaterialTheme.colorScheme.surfaceVariant
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(bottom = 24.dp)
-    ) {
-        item { Spacer(modifier = Modifier.height(8.dp)) }
+    if (mostrarDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = fechaObj
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli(),
+            selectableDates = object : SelectableDates {
+                // Solo se pueden seleccionar el día actual y días anteriores
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                    utcTimeMillis <= System.currentTimeMillis() + 86_400_000L
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { mostrarDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val fecha = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneOffset.UTC)
+                            .toLocalDate()
+                        onCambiarFecha(fecha)
+                    }
+                    mostrarDatePicker = false
+                }) { Text("Aceptar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDatePicker = false }) { Text("Cancelar") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 
-        item {
-            Column {
-                Text(
-                    text = "Hola, ${estado.apodo}",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = fechaHoy,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Banner de modo historial (solo lectura)
+        if (estado.esModoHistorial) {
+            Surface(color = MaterialTheme.colorScheme.tertiaryContainer) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Historial · Solo lectura",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    TextButton(onClick = onVolverAHoy) {
+                        Text("Volver a hoy", color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    }
+                }
             }
         }
 
-        item {
-            SelectorObjetivo(
-                objetivoActual = estado.objetivo,
-                onObjetivoSeleccionado = onObjetivoSeleccionado
-            )
-        }
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
+            item { Spacer(modifier = Modifier.height(8.dp)) }
 
-        item {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                AnilloCaloricoProgress(
-                    consumidoKcal = estado.consumidoKcal,
-                    objetivoKcal = estado.objetivoKcal,
-                    colorPrimario = colorSecundario,
-                    colorAdvertencia = colorTerciario,
-                    colorError = colorError,
-                    colorPista = colorSuperficieVariante
+            item {
+                Column {
+                    Text(
+                        text = "Hola, ${estado.apodo}",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    // Fecha tappable que abre el DatePicker
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { mostrarDatePicker = true }
+                    ) {
+                        Text(
+                            text = fechaFormateada,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (estado.esModoHistorial) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarMonth,
+                            contentDescription = "Abrir calendario",
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .size(16.dp),
+                            tint = if (estado.esModoHistorial) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            item {
+                SelectorObjetivo(
+                    objetivoActual = estado.objetivo,
+                    onObjetivoSeleccionado = onObjetivoSeleccionado
                 )
             }
-        }
 
-        item {
-            TarjetaMacros(
-                consumidoProteinasG = estado.consumidoProteinasG,
-                objetivoProteinasG = estado.objetivoProteinasG,
-                consumidoCarbosG = estado.consumidoCarbosG,
-                objetivoCarbosG = estado.objetivoCarbosG,
-                consumidoGrasasG = estado.consumidoGrasasG,
-                objetivoGrasasG = estado.objetivoGrasasG,
-                colorProteinas = colorPrimario,
-                colorCarbos = colorSecundario,
-                colorGrasas = colorTerciario
-            )
-        }
+            item {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    AnilloCaloricoProgress(
+                        consumidoKcal = estado.consumidoKcal,
+                        objetivoKcal = estado.objetivoKcal,
+                        colorPrimario = colorSecundario,
+                        colorAdvertencia = colorTerciario,
+                        colorError = colorError,
+                        colorPista = colorSuperficieVariante
+                    )
+                }
+            }
 
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Nivel de actividad",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                SelectorNivelActividad(
-                    nivelActual = estado.nivelActividad,
-                    onNivelSeleccionado = onNivelActividadSeleccionado
+            item {
+                TarjetaMacros(
+                    consumidoProteinasG = estado.consumidoProteinasG,
+                    objetivoProteinasG = estado.objetivoProteinasG,
+                    consumidoCarbosG = estado.consumidoCarbosG,
+                    objetivoCarbosG = estado.objetivoCarbosG,
+                    consumidoGrasasG = estado.consumidoGrasasG,
+                    objetivoGrasasG = estado.objetivoGrasasG,
+                    colorProteinas = colorPrimario,
+                    colorCarbos = colorSecundario,
+                    colorGrasas = colorTerciario
                 )
             }
-        }
 
-        item {
-            Text(
-                text = "INGESTAS DEL DÍA",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Nivel de actividad",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    SelectorNivelActividad(
+                        nivelActual = estado.nivelActividad,
+                        onNivelSeleccionado = onNivelActividadSeleccionado
+                    )
+                }
+            }
 
-        items(SLOTS_DEL_DIA) { slot ->
-            TarjetaSlotComida(
-                nombre = slot.nombre,
-                icono = slot.icono,
-                ingestas = estado.ingestasDelDia[slot.nombre] ?: emptyList(),
-                onClick = { onSlotClick(slot.nombre) }
-            )
+            // La sección de slots solo se muestra si no estamos en modo historial
+            if (!estado.esModoHistorial) {
+                item {
+                    Text(
+                        text = "INGESTAS DEL DÍA",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+
+                items(SLOTS_DEL_DIA) { slot ->
+                    TarjetaSlotComida(
+                        nombre = slot.nombre,
+                        icono = slot.icono,
+                        ingestas = estado.ingestasDelDia[slot.nombre] ?: emptyList(),
+                        onClick = { onSlotClick(slot.nombre) },
+                        onEliminarReceta = { receta -> onEliminarReceta(slot.nombre, receta) }
+                    )
+                }
+            } else {
+                item {
+                    Text(
+                        text = "Las ingestas detalladas por slot no se guardan históricamente.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    )
+                }
+            }
         }
     }
 }
 
 // ─── Picker de recetas (BottomSheet) ─────────────────────────────────────────
 
-/**
- * Contenido del BottomSheet para añadir una receta a un slot de ingesta.
- * Muestra la biblioteca de recetas del usuario. La búsqueda manual mediante API
- * externa (OpenFoodFacts) se implementará en una fase posterior.
- *
- * @param nombreSlot Nombre del slot al que se va a añadir la ingesta.
- * @param recetas Lista de recetas disponibles del usuario.
- * @param cargando Indica si las recetas aún se están cargando.
- * @param onRecetaSeleccionada Callback al confirmar una receta.
- */
 @Composable
 private fun PickerRecetasParaSlot(
     nombreSlot: String,
     recetas: List<Receta>,
+    ingestasActuales: List<Receta>,
     cargando: Boolean,
-    onRecetaSeleccionada: (Receta) -> Unit
+    busquedaTexto: String,
+    resultadosBusqueda: List<Receta>,
+    buscandoAlimento: Boolean,
+    onRecetaSeleccionada: (Receta) -> Unit,
+    onEliminarIngesta: (Receta) -> Unit,
+    onActualizarBusqueda: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -269,105 +390,174 @@ private fun PickerRecetasParaSlot(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
         )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "MIS RECETAS",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
 
-        when {
-            cargando -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Campo de búsqueda en OpenFoodFacts
+        OutlinedTextField(
+            value = busquedaTexto,
+            onValueChange = onActualizarBusqueda,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Buscar alimento...") },
+            leadingIcon = {
+                if (buscandoAlimento) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Outlined.Search, contentDescription = null)
                 }
-            }
-            recetas.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Restaurant,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Text(
-                            text = "Aún no tienes recetas guardadas",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+            },
+            trailingIcon = {
+                if (busquedaTexto.isNotBlank()) {
+                    IconButton(onClick = { onActualizarBusqueda("") }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Borrar búsqueda")
                     }
                 }
-            }
-            else -> {
-                // Altura acotada para que el BottomSheet no ocupe toda la pantalla
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp)
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (busquedaTexto.isNotBlank()) {
+            // Modo búsqueda: muestra resultados de OpenFoodFacts
+            Text(
+                text = "RESULTADOS · OPENFOODFACTS",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (resultadosBusqueda.isEmpty() && !buscandoAlimento) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Sin resultados para \"$busquedaTexto\"",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
                 LazyColumn(
-                    modifier = Modifier.heightIn(max = 380.dp),
+                    modifier = Modifier.heightIn(max = 340.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    items(recetas, key = { it.id }) { receta ->
-                        ItemRecetaPicker(
-                            receta = receta,
-                            onClick = { onRecetaSeleccionada(receta) }
+                    items(resultadosBusqueda, key = { it.id }) { receta ->
+                        ItemRecetaPicker(receta = receta, onClick = { onRecetaSeleccionada(receta) })
+                    }
+                }
+            }
+        } else {
+            // Modo normal: ingestas actuales + mis recetas
+            if (ingestasActuales.isNotEmpty()) {
+                Text(
+                    text = "EN ESTE SLOT",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Chips eliminables con las ingestas actuales del slot
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ingestasActuales.forEach { receta ->
+                        SuggestionChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    text = "${receta.titulo} · ${receta.kcalTotales} kcal",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = "Eliminar ${receta.titulo}",
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clickable { onEliminarIngesta(receta) }
+                                )
+                            }
                         )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            }
+
+            Text(
+                text = "MIS RECETAS",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            when {
+                cargando -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                recetas.isEmpty() -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Restaurant,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "Aún no tienes recetas guardadas",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 340.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        items(recetas, key = { it.id }) { receta ->
+                            ItemRecetaPicker(
+                                receta = receta,
+                                onClick = { onRecetaSeleccionada(receta) }
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // Sección de búsqueda manual (próximamente)
-        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(bottom = 8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-            Column {
-                Text(
-                    text = "Búsqueda manual",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Próximamente · OpenFoodFacts API",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-            }
-        }
         Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
-/**
- * Fila del picker que representa una receta disponible para añadir al slot.
- */
 @Composable
-private fun ItemRecetaPicker(
-    receta: Receta,
-    onClick: () -> Unit
-) {
+private fun ItemRecetaPicker(receta: Receta, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -404,18 +594,13 @@ private fun ItemRecetaPicker(
 
 // ─── Tarjeta de slot ──────────────────────────────────────────────────────────
 
-/**
- * Tarjeta de un slot de comida. Si el slot tiene ingestas añadidas en la sesión actual,
- * muestra el resumen de kcal acumuladas. De lo contrario, invita al usuario a añadir.
- *
- * @param ingestas Lista de recetas añadidas al slot en esta sesión (se pierde al cerrar la app).
- */
 @Composable
 private fun TarjetaSlotComida(
     nombre: String,
     icono: ImageVector,
     ingestas: List<Receta>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onEliminarReceta: (Receta) -> Unit
 ) {
     val kcalSlot = ingestas.sumOf { it.kcalTotales }
 
@@ -426,63 +611,92 @@ private fun TarjetaSlotComida(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = icono,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-                Column {
-                    Text(
-                        text = nombre,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = icono,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
                     )
-                    if (ingestas.isEmpty()) {
+                    Column {
                         Text(
-                            text = "Vacío · Toca para añadir",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = nombre,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                    } else {
-                        Text(
-                            text = ingestas.joinToString(", ") { it.titulo },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
+                        if (ingestas.isEmpty()) {
+                            Text(
+                                text = "Vacío · Toca para añadir",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                }
+
+                if (ingestas.isNotEmpty()) {
+                    Text(
+                        text = "$kcalSlot kcal",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Outlined.Add,
+                        contentDescription = "Añadir al slot $nombre",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
 
-            // Resumen de kcal del slot (solo si tiene ingestas) o icono de añadir
+            // Chips de ingestas con botón de eliminar (visibles si hay ingestas)
             if (ingestas.isNotEmpty()) {
-                Text(
-                    text = "$kcalSlot kcal",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Outlined.Add,
-                    contentDescription = "Añadir al slot $nombre",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    ingestas.forEach { receta ->
+                        SuggestionChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    text = receta.titulo,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1
+                                )
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = "Eliminar ${receta.titulo}",
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable { onEliminarReceta(receta) }
+                                )
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -490,10 +704,6 @@ private fun TarjetaSlotComida(
 
 // ─── Componentes de dashboard ─────────────────────────────────────────────────
 
-/**
- * Anillo de progreso calórico dibujado con Canvas.
- * El color cambia dinámicamente: verde → naranja → rojo según la proximidad al objetivo.
- */
 @Composable
 private fun AnilloCaloricoProgress(
     consumidoKcal: Int,
@@ -575,7 +785,9 @@ private fun TarjetaMacros(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             BarraMacro("Proteínas", consumidoProteinasG, objetivoProteinasG, colorProteinas)
@@ -610,7 +822,10 @@ private fun BarraMacro(etiqueta: String, consumidoG: Float, objetivoG: Float, co
         Spacer(modifier = Modifier.height(6.dp))
         LinearProgressIndicator(
             progress = { progresoAnimado },
-            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp)),
             color = color,
             trackColor = MaterialTheme.colorScheme.surface
         )
@@ -668,33 +883,5 @@ private fun PantallaError(mensaje: String, onReintentar: () -> Unit) {
             Text(mensaje, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             TextButton(onClick = onReintentar) { Text("Reintentar") }
         }
-    }
-}
-
-// ─── Preview ──────────────────────────────────────────────────────────────────
-
-@Preview(showBackground = true)
-@Composable
-private fun PrevisualizacionPantallaCalculadora() {
-    val recetaEjemplo = Receta("1", "u1", "Tortilla de 3 huevos", 280, 22f, 2f, 20f, "")
-    ZentraTheme(temaOscuro = true) {
-        ContenidoCalculadora(
-            estado = EstadoCalculadora(
-                cargando = false,
-                apodo = "Dani",
-                objetivoKcal = 2450,
-                consumidoKcal = 1200,
-                objetivoProteinasG = 160f,
-                consumidoProteinasG = 85f,
-                objetivoCarbosG = 255f,
-                consumidoCarbosG = 110f,
-                objetivoGrasasG = 82f,
-                consumidoGrasasG = 40f,
-                ingestasDelDia = mapOf("Desayuno" to listOf(recetaEjemplo))
-            ),
-            onObjetivoSeleccionado = {},
-            onNivelActividadSeleccionado = {},
-            onSlotClick = {}
-        )
     }
 }

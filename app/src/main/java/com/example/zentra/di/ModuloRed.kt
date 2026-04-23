@@ -1,6 +1,7 @@
 package com.example.zentra.di
 
 import com.example.zentra.data.remote.ConstantesRed
+import com.example.zentra.data.remote.api.OpenFoodFactsService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -68,4 +69,13 @@ object ModuloRed {
         .client(okHttpClient)
         .addConverterFactory(GsonConverterFactory.create())
         .build()
+
+    /**
+     * Proporciona la implementación de [OpenFoodFactsService] generada por Retrofit.
+     * @param retrofit Instancia de Retrofit ya configurada con la base URL y el conversor.
+     */
+    @Provides
+    @Singleton
+    fun provideOpenFoodFactsService(retrofit: Retrofit): OpenFoodFactsService =
+        retrofit.create(OpenFoodFactsService::class.java)
 }
