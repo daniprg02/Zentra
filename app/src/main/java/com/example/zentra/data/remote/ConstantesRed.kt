@@ -20,4 +20,7 @@ object ConstantesRed {
 
     // OpenFoodFacts es una API pública y gratuita, no requiere autenticación
     const val API_NUTRICIONAL_BASE_URL = "https://world.openfoodfacts.org/"
+
+    // Gemini REST API — la clave se inyecta desde BuildConfig (local.properties)
+    const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"
 }

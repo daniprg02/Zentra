@@ -34,8 +34,6 @@ okhttp = "4.12.0"
 # Serialización Kotlin (necesaria para Supabase)
 kotlinxSerialization = "1.7.3"
 
-# Gemini AI (generación inteligente de rutinas)
-generativeai = "0.9.0"
 
 
 [libraries]
@@ -85,9 +83,6 @@ okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor" 
 
 # --- Serialización Kotlin ---
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
-
-# --- Gemini AI ---
-google-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeai" }
 
 # --- Tests ---
 junit = { group = "junit", name = "junit", version.ref = "junit" }

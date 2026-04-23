@@ -1,11 +1,15 @@
 package com.example.zentra.data.remote.gemini
 
 import android.util.Log
+import com.example.zentra.BuildConfig
+import com.example.zentra.data.remote.api.GeminiApiService
+import com.example.zentra.data.remote.dto.ContenidoGeminiReq
+import com.example.zentra.data.remote.dto.ParteGeminiReq
+import com.example.zentra.data.remote.dto.PeticionGemini
 import com.example.zentra.domain.model.DiaRutina
 import com.example.zentra.domain.model.EjercicioEnRutina
 import com.example.zentra.domain.model.Ejercicio
 import com.example.zentra.ui.screens.rutinas.DatosCuestionario
-import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -31,12 +35,12 @@ private data class EjercicioGemini(
 )
 
 /**
- * Llama a Gemini para generar un plan de entrenamiento personalizado.
- * Recibe el catálogo de ejercicios disponibles y devuelve los días del plan,
- * o null si falla (el ViewModel usará el algoritmo local como fallback).
+ * Llama a la API REST de Gemini para generar un plan de entrenamiento personalizado.
+ * Devuelve null si la petición falla o la respuesta no es válida; el ViewModel
+ * usará el algoritmo local como fallback.
  */
 class GeminiGeneradorRutinas @Inject constructor(
-    private val model: GenerativeModel
+    private val geminiService: GeminiApiService
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -52,11 +56,28 @@ class GeminiGeneradorRutinas @Inject constructor(
             val prompt = construirPrompt(datos, ejercicios)
             Log.d("GeminiGeneradorRutinas", "Prompt enviado. Ejercicios en catálogo: ${ejercicios.size}")
 
-            val respuesta = model.generateContent(prompt)
-            val texto = respuesta.text ?: run {
-                Log.w("GeminiGeneradorRutinas", "Respuesta vacía de Gemini.")
-                return null
-            }
+            val peticion = PeticionGemini(
+                contents = listOf(
+                    ContenidoGeminiReq(parts = listOf(ParteGeminiReq(text = prompt)))
+                )
+            )
+
+            val respuesta = geminiService.generarContenido(
+                modelo = "gemini-2.0-flash-lite",
+                apiKey = BuildConfig.GEMINI_API_KEY,
+                peticion = peticion
+            )
+
+            val texto = respuesta.candidates
+                ?.firstOrNull()
+                ?.content
+                ?.parts
+                ?.firstOrNull()
+                ?.text
+                ?: run {
+                    Log.w("GeminiGeneradorRutinas", "Respuesta vacía de Gemini.")
+                    return null
+                }
 
             val jsonLimpio = extraerJson(texto)
             Log.d("GeminiGeneradorRutinas", "JSON recibido (primeros 200 chars): ${jsonLimpio.take(200)}")

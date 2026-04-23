@@ -93,9 +93,6 @@ dependencies {
     // --- Serialización ---
     implementation(libs.kotlinx.serialization.json)
 
-    // --- Gemini AI ---
-    implementation(libs.google.generativeai)
-
     // --- Tests ---
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
