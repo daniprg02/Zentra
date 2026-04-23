@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.rutinas
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.remote.dto.PerfilDto
 import com.example.zentra.data.remote.gemini.GeminiGeneradorRutinas
 import com.example.zentra.domain.model.DiaRutina
 import com.example.zentra.domain.model.Ejercicio
@@ -12,6 +13,7 @@ import com.example.zentra.domain.repository.IRutinasRepositorio
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +29,7 @@ import javax.inject.Inject
  * - Guiar el cuestionario de 3 pasos para generar una rutina personalizada.
  * - Llamar a Gemini para generar la rutina con IA; si falla, usar el algoritmo local.
  * - Listar todas las rutinas guardadas y permitir activar una anterior o eliminar con confirmación.
+ * - Leer el sexo del perfil para la variante del diagrama anatómico.
  */
 @HiltViewModel
 class RutinasViewModel @Inject constructor(
@@ -37,6 +40,10 @@ class RutinasViewModel @Inject constructor(
 
     private val _estado = MutableStateFlow<EstadoRutinas>(EstadoRutinas.Cargando)
     val estado: StateFlow<EstadoRutinas> = _estado.asStateFlow()
+
+    // Caché del sexo del usuario para el diagrama anatómico
+    private var sexoUsuario = "Masculino"
+    private var sexoCargado = false
 
     init {
         Log.d("RutinasViewModel", "ViewModel inicializado. Buscando rutina activa.")
@@ -52,13 +59,25 @@ class RutinasViewModel @Inject constructor(
                 val userId = supabase.auth.currentUserOrNull()?.id
                     ?: throw Exception("No hay sesión activa.")
 
+                // Lee el sexo del perfil una sola vez para el diagrama anatómico
+                if (!sexoCargado) {
+                    sexoUsuario = try {
+                        supabase.from("profiles")
+                            .select { filter { eq("id", userId) } }
+                            .decodeSingleOrNull<PerfilDto>()
+                            ?.sexo?.takeIf { it.isNotBlank() } ?: "Masculino"
+                    } catch (e: Exception) { "Masculino" }
+                    sexoCargado = true
+                    Log.d("RutinasViewModel", "Sexo del perfil cargado: $sexoUsuario")
+                }
+
                 val activa = rutinasRepositorio.obtenerRutinaActiva(userId).getOrNull()
                 val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
 
                 _estado.value = if (activa != null) {
                     val (cabecera, dias) = activa
                     Log.d("RutinasViewModel", "Rutina activa: ${dias.size} días. Total guardadas: ${todas.size}.")
-                    EstadoRutinas.RutinaActiva(cabecera = cabecera, dias = dias, todasLasRutinas = todas)
+                    EstadoRutinas.RutinaActiva(cabecera = cabecera, dias = dias, todasLasRutinas = todas, sexo = sexoUsuario)
                 } else {
                     Log.d("RutinasViewModel", "Sin rutina activa. Guardadas: ${todas.size}.")
                     EstadoRutinas.SinRutina(todasLasRutinas = todas)
@@ -135,7 +154,8 @@ class RutinasViewModel @Inject constructor(
                 _estado.value = EstadoRutinas.RutinaActiva(
                     cabecera = rutina.copy(activa = true),
                     dias = dias,
-                    todasLasRutinas = todas
+                    todasLasRutinas = todas,
+                    sexo = sexoUsuario
                 )
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al activar rutina: ${e.message}")
@@ -224,7 +244,11 @@ class RutinasViewModel @Inject constructor(
 
                 val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
                 Log.d("RutinasViewModel", "Rutina $rutinaId guardada con ${dias.size} días.")
-                _estado.value = EstadoRutinas.RutinaActiva(rutina, dias, todasLasRutinas = todas)
+                _estado.value = EstadoRutinas.RutinaActiva(
+                    rutina, dias,
+                    todasLasRutinas = todas,
+                    sexo = sexoUsuario
+                )
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al generar la rutina: ${e.message}")
                 _estado.value = EstadoRutinas.Error("No se pudo generar tu rutina. Inténtalo de nuevo.")
@@ -342,6 +366,7 @@ sealed class EstadoRutinas {
         val cabecera: RutinaUsuario,
         val dias: List<DiaRutina>,
         val todasLasRutinas: List<RutinaUsuario> = emptyList(),
+        val sexo: String = "Masculino",
         val mostrandoDialogoNueva: Boolean = false,
         val rutinaParaEliminar: RutinaUsuario? = null
     ) : EstadoRutinas()

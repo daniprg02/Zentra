@@ -119,6 +119,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             cabecera = s.cabecera,
             dias = s.dias,
             todasLasRutinas = s.todasLasRutinas,
+            sexo = s.sexo,
             mostrandoDialogoNueva = s.mostrandoDialogoNueva,
             rutinaParaEliminar = s.rutinaParaEliminar,
             onPedirNuevaRutina = viewModel::pedirNuevaRutina,
@@ -405,6 +406,7 @@ private fun PantallaRutinaActiva(
     cabecera: RutinaUsuario,
     dias: List<DiaRutina>,
     todasLasRutinas: List<RutinaUsuario>,
+    sexo: String,
     mostrandoDialogoNueva: Boolean,
     rutinaParaEliminar: RutinaUsuario?,
     onPedirNuevaRutina: () -> Unit,
@@ -455,6 +457,24 @@ private fun PantallaRutinaActiva(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { CabeceraPlan(cabecera = cabecera) }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    DiagramaCuerpoHumano(
+                        dias = dias,
+                        sexo = sexo,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp)
+                    )
+                }
+            }
 
             items(dias, key = { it.id }) { dia ->
                 val expandido = expandidos[dia.diaNumero] ?: (dia.diaNumero == 1)
