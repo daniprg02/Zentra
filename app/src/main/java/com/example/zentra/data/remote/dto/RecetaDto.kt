@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * DTO para la tabla `recipes` de Supabase.
- * El campo [ingredientes] almacena la lista en texto o JSONB según la configuración de la BD.
+ * Los valores por defecto permiten deserializar respuestas parciales sin errores.
  */
 @Serializable
 data class RecetaDto(
@@ -17,7 +17,10 @@ data class RecetaDto(
     @SerialName("proteinas_g") val proteinasG: Float = 0f,
     @SerialName("carbos_g") val carbosG: Float = 0f,
     @SerialName("grasas_g") val grasasG: Float = 0f,
-    val ingredientes: String = ""
+    val ingredientes: String = "",
+    val fijada: Boolean = false,
+    // Nullable: al insertar enviamos null para que Supabase aplique DEFAULT now()
+    @SerialName("creada_en") val creadaEn: String? = null
 ) {
     /** Convierte este DTO al modelo de dominio [Receta]. */
     fun asDominio() = Receta(
@@ -28,7 +31,9 @@ data class RecetaDto(
         proteinasG = proteinasG,
         carbosG = carbosG,
         grasasG = grasasG,
-        ingredientes = ingredientes
+        ingredientes = ingredientes,
+        fijada = fijada,
+        creadaEn = creadaEn
     )
 }
 
@@ -41,5 +46,7 @@ fun Receta.asDto() = RecetaDto(
     proteinasG = proteinasG,
     carbosG = carbosG,
     grasasG = grasasG,
-    ingredientes = ingredientes
+    ingredientes = ingredientes,
+    fijada = fijada,
+    creadaEn = creadaEn
 )
