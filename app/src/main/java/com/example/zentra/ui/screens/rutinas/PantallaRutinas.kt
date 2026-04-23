@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
@@ -42,6 +43,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -82,12 +84,8 @@ private val TODOS_LOS_MUSCULOS = listOf(
 )
 
 private val OPCIONES_EXPERIENCIA = listOf(
-    "Nunca he entrenado",
-    "Menos de 1 mes",
-    "1 a 3 meses",
-    "3 a 6 meses",
-    "6 a 12 meses",
-    "Más de 1 año"
+    "Nunca he entrenado", "Menos de 1 mes", "1 a 3 meses",
+    "3 a 6 meses", "6 a 12 meses", "Más de 1 año"
 )
 
 private val OPCIONES_LUGAR = listOf(
@@ -100,7 +98,15 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
 
     when (val s = estado) {
         is EstadoRutinas.Cargando -> PantallaCargando()
-        is EstadoRutinas.SinRutina -> PantallaSinRutina(onIniciarCuestionario = viewModel::iniciarCuestionario)
+        is EstadoRutinas.SinRutina -> PantallaSinRutina(
+            todasLasRutinas = s.todasLasRutinas,
+            rutinaParaEliminar = s.rutinaParaEliminar,
+            onIniciarCuestionario = viewModel::iniciarCuestionario,
+            onActivarRutina = viewModel::activarRutina,
+            onPedirEliminar = viewModel::pedirEliminarRutina,
+            onCancelarEliminar = viewModel::cancelarEliminarRutina,
+            onConfirmarEliminar = viewModel::confirmarEliminarRutina
+        )
         is EstadoRutinas.EnCuestionario -> PantallaCuestionario(
             paso = s.paso,
             datos = s.datos,
@@ -112,10 +118,16 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
         is EstadoRutinas.RutinaActiva -> PantallaRutinaActiva(
             cabecera = s.cabecera,
             dias = s.dias,
-            mostrandoDialogo = s.mostrandoDialogoNueva,
+            todasLasRutinas = s.todasLasRutinas,
+            mostrandoDialogoNueva = s.mostrandoDialogoNueva,
+            rutinaParaEliminar = s.rutinaParaEliminar,
             onPedirNuevaRutina = viewModel::pedirNuevaRutina,
-            onCancelarDialogo = viewModel::cancelarNuevaRutina,
-            onConfirmarNuevaRutina = viewModel::confirmarNuevaRutina
+            onCancelarNuevaRutina = viewModel::cancelarNuevaRutina,
+            onConfirmarNuevaRutina = viewModel::confirmarNuevaRutina,
+            onActivarRutina = viewModel::activarRutina,
+            onPedirEliminar = viewModel::pedirEliminarRutina,
+            onCancelarEliminar = viewModel::cancelarEliminarRutina,
+            onConfirmarEliminar = viewModel::confirmarEliminarRutina
         )
         is EstadoRutinas.Error -> PantallaError(
             mensaje = s.mensaje,
@@ -125,64 +137,83 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
 }
 
 // ─────────────────────────────────────────────
-// Sin rutina — pantalla de bienvenida
+// Sin rutina activa
 // ─────────────────────────────────────────────
 
 @Composable
-private fun PantallaSinRutina(onIniciarCuestionario: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+private fun PantallaSinRutina(
+    todasLasRutinas: List<RutinaUsuario>,
+    rutinaParaEliminar: RutinaUsuario?,
+    onIniciarCuestionario: () -> Unit,
+    onActivarRutina: (RutinaUsuario) -> Unit,
+    onPedirEliminar: (RutinaUsuario) -> Unit,
+    onCancelarEliminar: () -> Unit,
+    onConfirmarEliminar: () -> Unit
+) {
+    DialogoEliminarRutina(
+        rutina = rutinaParaEliminar,
+        onCancelar = onCancelarEliminar,
+        onConfirmar = onConfirmarEliminar
+    )
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(96.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.FitnessCenter,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.primary
+        item {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier.size(96.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Outlined.FitnessCenter,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "Tu plan de entrenamiento",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Responde unas preguntas rápidas y Zentra diseñará una rutina adaptada a ti.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(onClick = onIniciarCuestionario, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Generar mi rutina")
+                }
+            }
+        }
+
+        if (todasLasRutinas.isNotEmpty()) {
+            item {
+                Text(
+                    "RUTINAS GUARDADAS",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "Tu plan de entrenamiento",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Responde unas preguntas rápidas y Zentra diseñará una rutina adaptada a ti.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = onIniciarCuestionario,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
+            items(todasLasRutinas, key = { it.id }) { rutina ->
+                TarjetaRutinaHistorial(
+                    rutina = rutina,
+                    esActiva = rutina.activa,
+                    onActivar = { onActivarRutina(rutina) },
+                    onEliminar = { onPedirEliminar(rutina) }
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Generar mi rutina")
             }
         }
     }
@@ -201,18 +232,13 @@ private fun PantallaCuestionario(
     onAtras: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        LinearProgressIndicator(
-            progress = { paso / 3f },
-            modifier = Modifier.fillMaxWidth()
-        )
-
+        LinearProgressIndicator(progress = { paso / 3f }, modifier = Modifier.fillMaxWidth())
         Text(
-            text = "Paso $paso de 3",
+            "Paso $paso de 3",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
         )
-
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -226,23 +252,14 @@ private fun PantallaCuestionario(
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
-
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            OutlinedButton(
-                onClick = onAtras,
-                modifier = Modifier.weight(1f)
-            ) {
+            OutlinedButton(onClick = onAtras, modifier = Modifier.weight(1f)) {
                 Text(if (paso == 1) "Cancelar" else "Atrás")
             }
-            Button(
-                onClick = onSiguiente,
-                modifier = Modifier.weight(1f)
-            ) {
+            Button(onClick = onSiguiente, modifier = Modifier.weight(1f)) {
                 Text(if (paso == 3) "Generar rutina" else "Siguiente")
             }
         }
@@ -252,13 +269,8 @@ private fun PantallaCuestionario(
 @Composable
 private fun PasoDiasYObjetivo(datos: DatosCuestionario, onActualizar: (DatosCuestionario) -> Unit) {
     Column {
-        Text(
-            text = "¿Cuántos días entrenas a la semana?",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
+        Text("¿Cuántos días entrenas a la semana?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(12.dp))
-
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (2..6).forEach { n ->
                 FilterChip(
@@ -268,18 +280,11 @@ private fun PasoDiasYObjetivo(datos: DatosCuestionario, onActualizar: (DatosCues
                 )
             }
         }
-
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "¿Cuál es tu objetivo principal?",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
+        Text("¿Cuál es tu objetivo principal?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(12.dp))
-
         val opciones = listOf("Déficit", "Mantenimiento", "Superávit")
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             opciones.forEachIndexed { index, opcion ->
@@ -287,9 +292,7 @@ private fun PasoDiasYObjetivo(datos: DatosCuestionario, onActualizar: (DatosCues
                     selected = datos.objetivo == opcion,
                     onClick = { onActualizar(datos.copy(objetivo = opcion)) },
                     shape = SegmentedButtonDefaults.itemShape(index = index, count = opciones.size)
-                ) {
-                    Text(opcion, style = MaterialTheme.typography.labelSmall)
-                }
+                ) { Text(opcion, style = MaterialTheme.typography.labelSmall) }
             }
         }
     }
@@ -298,43 +301,29 @@ private fun PasoDiasYObjetivo(datos: DatosCuestionario, onActualizar: (DatosCues
 @Composable
 private fun PasoMusculosPrioritarios(datos: DatosCuestionario, onActualizar: (DatosCuestionario) -> Unit) {
     Column {
-        Text(
-            text = "¿Qué músculos quieres priorizar?",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
+        Text("¿Qué músculos quieres priorizar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Recibirán más ejercicios en tu rutina. Puedes no seleccionar ninguno.",
+            "Recibirán más ejercicios. Puedes no seleccionar ninguno.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(16.dp))
-
         TODOS_LOS_MUSCULOS.chunked(2).forEach { fila ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 fila.forEach { musculo ->
-                    val seleccionado = musculo in datos.musculosPrioritarios
+                    val sel = musculo in datos.musculosPrioritarios
                     FilterChip(
-                        selected = seleccionado,
+                        selected = sel,
                         onClick = {
                             val nuevos = datos.musculosPrioritarios.toMutableSet()
-                            if (seleccionado) nuevos.remove(musculo) else nuevos.add(musculo)
+                            if (sel) nuevos.remove(musculo) else nuevos.add(musculo)
                             onActualizar(datos.copy(musculosPrioritarios = nuevos))
                         },
                         label = { Text(musculo) },
                         modifier = Modifier.weight(1f),
-                        leadingIcon = if (seleccionado) {
-                            {
-                                Icon(
-                                    imageVector = Icons.Outlined.CheckCircle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(FilterChipDefaults.IconSize)
-                                )
-                            }
+                        leadingIcon = if (sel) {
+                            { Icon(Icons.Outlined.CheckCircle, null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
                         } else null
                     )
                 }
@@ -348,63 +337,33 @@ private fun PasoMusculosPrioritarios(datos: DatosCuestionario, onActualizar: (Da
 @Composable
 private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (DatosCuestionario) -> Unit) {
     Column {
-        Text(
-            text = "¿Cuánta experiencia tienes entrenando?",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
+        Text("¿Cuánta experiencia tienes entrenando?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(12.dp))
-
         OPCIONES_EXPERIENCIA.forEach { opcion ->
-            val seleccionada = datos.experiencia == opcion
+            val sel = datos.experiencia == opcion
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onActualizar(datos.copy(experiencia = opcion)) }
-                    .padding(vertical = 2.dp),
+                modifier = Modifier.fillMaxWidth().clickable { onActualizar(datos.copy(experiencia = opcion)) }.padding(vertical = 2.dp),
                 shape = RoundedCornerShape(8.dp),
-                color = if (seleccionada) MaterialTheme.colorScheme.primaryContainer
-                else Color.Transparent
+                color = if (sel) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = opcion,
+                        opcion,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (seleccionada) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurface,
+                        color = if (sel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
-                    if (seleccionada) {
-                        Icon(
-                            imageVector = Icons.Outlined.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    if (sel) Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "¿Dónde vas a entrenar?",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
+        Text("¿Dónde vas a entrenar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(12.dp))
-
         OPCIONES_LUGAR.chunked(2).forEach { fila ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 fila.forEach { lugar ->
                     FilterChip(
                         selected = datos.lugarEntrenamiento == lugar,
@@ -426,73 +385,72 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
 
 @Composable
 private fun PantallaGenerando() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(modifier = Modifier.size(56.dp))
             Spacer(modifier = Modifier.height(20.dp))
-            Text(
-                text = "Generando tu rutina...",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            Text("Generando tu rutina...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Personalizando ejercicios y volumen",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text("Personalizando ejercicios y volumen", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 // ─────────────────────────────────────────────
-// Rutina activa
+// Rutina activa + historial de rutinas
 // ─────────────────────────────────────────────
 
 @Composable
 private fun PantallaRutinaActiva(
     cabecera: RutinaUsuario,
     dias: List<DiaRutina>,
-    mostrandoDialogo: Boolean,
+    todasLasRutinas: List<RutinaUsuario>,
+    mostrandoDialogoNueva: Boolean,
+    rutinaParaEliminar: RutinaUsuario?,
     onPedirNuevaRutina: () -> Unit,
-    onCancelarDialogo: () -> Unit,
-    onConfirmarNuevaRutina: () -> Unit
+    onCancelarNuevaRutina: () -> Unit,
+    onConfirmarNuevaRutina: () -> Unit,
+    onActivarRutina: (RutinaUsuario) -> Unit,
+    onPedirEliminar: (RutinaUsuario) -> Unit,
+    onCancelarEliminar: () -> Unit,
+    onConfirmarEliminar: () -> Unit
 ) {
-    // Mapa local para controlar qué días están desplegados (el primero se abre por defecto)
     val expandidos = remember { mutableStateMapOf<Int, Boolean>() }
 
-    if (mostrandoDialogo) {
+    if (mostrandoDialogoNueva) {
         AlertDialog(
-            onDismissRequest = onCancelarDialogo,
+            onDismissRequest = onCancelarNuevaRutina,
             title = { Text("¿Crear una nueva rutina?") },
-            text = { Text("Tu rutina actual se reemplazará. Esta acción no se puede deshacer.") },
+            text = { Text("Se generará un nuevo plan. Tu rutina actual quedará guardada en el historial.") },
             confirmButton = {
                 TextButton(onClick = onConfirmarNuevaRutina) {
-                    Text("Sí, crear nueva", color = MaterialTheme.colorScheme.error)
+                    Text("Sí, crear nueva", color = MaterialTheme.colorScheme.primary)
                 }
             },
-            dismissButton = {
-                TextButton(onClick = onCancelarDialogo) { Text("Cancelar") }
-            }
+            dismissButton = { TextButton(onClick = onCancelarNuevaRutina) { Text("Cancelar") } }
         )
     }
+
+    DialogoEliminarRutina(
+        rutina = rutinaParaEliminar,
+        onCancelar = onCancelarEliminar,
+        onConfirmar = onConfirmarEliminar
+    )
+
+    // Rutinas anteriores (excluye la activa actual)
+    val rutinasAnteriores = todasLasRutinas.filter { it.id != cabecera.id }
 
     Scaffold(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onPedirNuevaRutina,
-                icon = { Icon(imageVector = Icons.Outlined.Refresh, contentDescription = null) },
+                icon = { Icon(Icons.Outlined.Refresh, null) },
                 text = { Text("Nueva rutina") }
             )
         }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -508,9 +466,114 @@ private fun PantallaRutinaActiva(
                 )
             }
 
+            // Sección de rutinas anteriores
+            if (rutinasAnteriores.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "RUTINAS GUARDADAS (${rutinasAnteriores.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                items(rutinasAnteriores, key = { it.id }) { rutina ->
+                    TarjetaRutinaHistorial(
+                        rutina = rutina,
+                        esActiva = false,
+                        onActivar = { onActivarRutina(rutina) },
+                        onEliminar = { onPedirEliminar(rutina) }
+                    )
+                }
+            }
+
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
+}
+
+// ─────────────────────────────────────────────
+// Componentes compartidos
+// ─────────────────────────────────────────────
+
+@Composable
+private fun TarjetaRutinaHistorial(
+    rutina: RutinaUsuario,
+    esActiva: Boolean,
+    onActivar: () -> Unit,
+    onEliminar: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "${rutina.diasSemana}d",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Plan de ${rutina.diasSemana} días",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    rutina.objetivo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!esActiva) {
+                TextButton(
+                    onClick = onActivar,
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Text("Activar", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            IconButton(onClick = onEliminar) {
+                Icon(
+                    Icons.Outlined.Delete,
+                    contentDescription = "Eliminar rutina",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogoEliminarRutina(
+    rutina: RutinaUsuario?,
+    onCancelar: () -> Unit,
+    onConfirmar: () -> Unit
+) {
+    if (rutina == null) return
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        title = { Text("¿Eliminar esta rutina?") },
+        text = { Text("Se borrará permanentemente el plan de ${rutina.diasSemana} días (${rutina.objetivo}). Esta acción no se puede deshacer.") },
+        confirmButton = {
+            TextButton(onClick = onConfirmar) {
+                Text("Sí, eliminar", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
+    )
 }
 
 @Composable
@@ -519,36 +582,23 @@ private fun CabeceraPlan(cabecera: RutinaUsuario) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.FitnessCenter,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(24.dp)
-                )
+                Icon(Icons.Outlined.FitnessCenter, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
             }
-
             Spacer(modifier = Modifier.width(12.dp))
-
             Column {
                 Text(
-                    text = "Plan de ${cabecera.diasSemana} días",
+                    "Plan activo · ${cabecera.diasSemana} días",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    text = "Objetivo: ${cabecera.objetivo}",
+                    "Objetivo: ${cabecera.objetivo}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                 )
@@ -569,75 +619,36 @@ private fun TarjetaDia(
         animationSpec = tween(200),
         label = "rotacion_flecha_dia"
     )
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Column {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onToggle)
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(colorAccento),
+                    modifier = Modifier.size(36.dp).clip(CircleShape).background(colorAccento),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "${dia.diaNumero}",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+                    Text("${dia.diaNumero}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White)
                 }
-
                 Spacer(modifier = Modifier.width(12.dp))
-
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Día ${dia.diaNumero}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = dia.nombreDia,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Text("Día ${dia.diaNumero}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(dia.nombreDia, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 }
-
-                Text(
-                    text = "${dia.ejercicios.size} ejercicios",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
+                Text("${dia.ejercicios.size} ejercicios", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.width(8.dp))
-
                 Icon(
-                    imageVector = Icons.Outlined.ExpandMore,
-                    contentDescription = if (expandido) "Colapsar" else "Expandir",
+                    Icons.Outlined.ExpandMore,
+                    contentDescription = null,
                     modifier = Modifier.rotate(rotacion),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            AnimatedVisibility(
-                visible = expandido,
-                enter = expandVertically(tween(200)),
-                exit = shrinkVertically(tween(200))
-            ) {
+            AnimatedVisibility(visible = expandido, enter = expandVertically(tween(200)), exit = shrinkVertically(tween(200))) {
                 Column {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    dia.ejercicios.forEach { ejercicio ->
-                        ItemEjercicio(ejercicio = ejercicio, colorAccento = colorAccento)
-                    }
+                    dia.ejercicios.forEach { ej -> ItemEjercicio(ejercicio = ej, colorAccento = colorAccento) }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -648,34 +659,17 @@ private fun TarjetaDia(
 @Composable
 private fun ItemEjercicio(ejercicio: EjercicioEnRutina, colorAccento: Color) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(colorAccento)
-        )
-
+        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(colorAccento))
         Spacer(modifier = Modifier.width(12.dp))
-
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = ejercicio.nombre,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                text = ejercicio.grupoMuscular,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(ejercicio.nombre, style = MaterialTheme.typography.bodyMedium)
+            Text(ejercicio.grupoMuscular, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-
         Text(
-            text = "${ejercicio.series} × ${ejercicio.repeticiones}",
+            "${ejercicio.series} × ${ejercicio.repeticiones}",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = colorAccento
@@ -696,24 +690,11 @@ private fun PantallaCargando() {
 
 @Composable
 private fun PantallaError(mensaje: String, onReintentar: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = mensaje,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.error
-            )
+            Text(mensaje, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = onReintentar,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-            ) {
+            Button(onClick = onReintentar, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
                 Text("Reintentar")
             }
         }

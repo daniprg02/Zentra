@@ -41,4 +41,34 @@ interface IRutinasRepositorio {
      * @return [Result] vacío si la operación es exitosa.
      */
     suspend fun desactivarRutinaActiva(userId: String): Result<Unit>
+
+    /**
+     * Obtiene todas las rutinas del usuario ordenadas de más reciente a más antigua.
+     * @param userId UUID del usuario autenticado.
+     * @return [Result] con la lista completa de [RutinaUsuario].
+     */
+    suspend fun obtenerTodasLasRutinas(userId: String): Result<List<RutinaUsuario>>
+
+    /**
+     * Obtiene los días de una rutina concreta, ordenados por número de día.
+     * Se usa para cargar los días al activar una rutina anterior.
+     * @param rutinaId UUID de la rutina.
+     * @return [Result] con la lista de [DiaRutina].
+     */
+    suspend fun obtenerDiasDeRutina(rutinaId: String): Result<List<DiaRutina>>
+
+    /**
+     * Marca una rutina concreta como activa (sin tocar las demás).
+     * Debe llamarse tras [desactivarRutinaActiva] para garantizar unicidad.
+     * @param rutinaId UUID de la rutina a activar.
+     * @return [Result] vacío si la operación es exitosa.
+     */
+    suspend fun marcarRutinaActiva(rutinaId: String): Result<Unit>
+
+    /**
+     * Elimina permanentemente una rutina y sus días (cascade en BD).
+     * @param rutinaId UUID de la rutina a eliminar.
+     * @return [Result] vacío si la operación es exitosa.
+     */
+    suspend fun eliminarRutina(rutinaId: String): Result<Unit>
 }

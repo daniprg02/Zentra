@@ -101,4 +101,65 @@ class RutinasRepositorioImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun obtenerTodasLasRutinas(userId: String): Result<List<RutinaUsuario>> {
+        return try {
+            val rutinas = supabase
+                .from("user_routines")
+                .select { filter { eq("user_id", userId) } }
+                .decodeList<RutinaUsuarioDto>()
+                .sortedByDescending { it.creadaEn }
+                .map { it.asDominio() }
+            Log.d("RutinasRepositorioImpl", "${rutinas.size} rutinas totales cargadas para el usuario $userId.")
+            Result.success(rutinas)
+        } catch (e: Exception) {
+            Log.e("RutinasRepositorioImpl", "Error al obtener todas las rutinas: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun obtenerDiasDeRutina(rutinaId: String): Result<List<DiaRutina>> {
+        return try {
+            val dias = supabase
+                .from("routine_days")
+                .select { filter { eq("routine_id", rutinaId) } }
+                .decodeList<DiaRutinaDto>()
+                .sortedBy { it.diaNumero }
+                .map { it.asDominio() }
+            Log.d("RutinasRepositorioImpl", "${dias.size} días cargados para la rutina $rutinaId.")
+            Result.success(dias)
+        } catch (e: Exception) {
+            Log.e("RutinasRepositorioImpl", "Error al obtener días de la rutina $rutinaId: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun marcarRutinaActiva(rutinaId: String): Result<Unit> {
+        return try {
+            supabase.from("user_routines").update({
+                set("activa", true)
+            }) {
+                filter { eq("id", rutinaId) }
+            }
+            Log.d("RutinasRepositorioImpl", "Rutina $rutinaId marcada como activa.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("RutinasRepositorioImpl", "Error al marcar rutina activa $rutinaId: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun eliminarRutina(rutinaId: String): Result<Unit> {
+        return try {
+            // Los routine_days se eliminan en cascada por la FK ON DELETE CASCADE
+            supabase.from("user_routines").delete {
+                filter { eq("id", rutinaId) }
+            }
+            Log.d("RutinasRepositorioImpl", "Rutina $rutinaId eliminada (días en cascada).")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("RutinasRepositorioImpl", "Error al eliminar la rutina $rutinaId: ${e.message}")
+            Result.failure(e)
+        }
+    }
 }

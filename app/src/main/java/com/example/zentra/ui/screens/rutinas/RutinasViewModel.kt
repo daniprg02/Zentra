@@ -21,11 +21,10 @@ import javax.inject.Inject
  * ViewModel del módulo de Rutinas de Entrenamiento.
  *
  * Responsabilidades:
- * - Verificar si el usuario ya tiene un plan activo al iniciar la pantalla.
- * - Guiar al usuario por el cuestionario de tres pasos para personalizar su rutina.
- * - Aplicar el algoritmo de generación: split por días → filtrado de ejercicios →
- *   asignación de volumen según objetivo → persistencia en Supabase.
- * - Gestionar el flujo de creación de una nueva rutina sobre una existente.
+ * - Verificar si el usuario tiene un plan activo al iniciar.
+ * - Guiar el cuestionario de 3 pasos para generar una rutina personalizada.
+ * - Aplicar el algoritmo: split por días → filtrar ejercicios → asignar volumen → persistir.
+ * - Listar todas las rutinas guardadas y permitir activar una anterior o eliminar con confirmación.
  */
 @HiltViewModel
 class RutinasViewModel @Inject constructor(
@@ -41,21 +40,29 @@ class RutinasViewModel @Inject constructor(
         cargarRutinaActiva()
     }
 
-    /** Consulta Supabase para determinar si el usuario ya tiene un plan activo. */
+    // ─── Carga inicial ────────────────────────────────────────────────────────
+
+    /**
+     * Consulta Supabase para determinar si el usuario tiene un plan activo.
+     * También carga el historial completo de rutinas para el gestor.
+     */
     fun cargarRutinaActiva() {
         viewModelScope.launch {
             _estado.value = EstadoRutinas.Cargando
             try {
                 val userId = supabase.auth.currentUserOrNull()?.id
                     ?: throw Exception("No hay sesión activa.")
-                val resultado = rutinasRepositorio.obtenerRutinaActiva(userId).getOrNull()
-                _estado.value = if (resultado != null) {
-                    val (cabecera, dias) = resultado
-                    Log.d("RutinasViewModel", "Rutina activa encontrada: ${dias.size} días.")
-                    EstadoRutinas.RutinaActiva(cabecera, dias)
+
+                val activa = rutinasRepositorio.obtenerRutinaActiva(userId).getOrNull()
+                val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
+
+                _estado.value = if (activa != null) {
+                    val (cabecera, dias) = activa
+                    Log.d("RutinasViewModel", "Rutina activa: ${dias.size} días. Total guardadas: ${todas.size}.")
+                    EstadoRutinas.RutinaActiva(cabecera = cabecera, dias = dias, todasLasRutinas = todas)
                 } else {
-                    Log.d("RutinasViewModel", "No hay rutina activa. Mostrando pantalla de inicio.")
-                    EstadoRutinas.SinRutina
+                    Log.d("RutinasViewModel", "Sin rutina activa. Guardadas: ${todas.size}.")
+                    EstadoRutinas.SinRutina(todasLasRutinas = todas)
                 }
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al cargar la rutina activa: ${e.message}")
@@ -63,6 +70,8 @@ class RutinasViewModel @Inject constructor(
             }
         }
     }
+
+    // ─── Cuestionario ─────────────────────────────────────────────────────────
 
     /** Inicia el cuestionario desde el paso 1 con valores por defecto. */
     fun iniciarCuestionario() {
@@ -75,7 +84,6 @@ class RutinasViewModel @Inject constructor(
         val actual = _estado.value as? EstadoRutinas.EnCuestionario ?: return
         if (actual.paso < 3) {
             _estado.value = actual.copy(paso = actual.paso + 1)
-            Log.d("RutinasViewModel", "Cuestionario: avanzando al paso ${actual.paso + 1}.")
         } else {
             generarYGuardarRutina(actual.datos)
         }
@@ -87,7 +95,7 @@ class RutinasViewModel @Inject constructor(
         if (actual.paso > 1) {
             _estado.value = actual.copy(paso = actual.paso - 1)
         } else {
-            _estado.value = EstadoRutinas.SinRutina
+            cargarRutinaActiva()
         }
     }
 
@@ -97,13 +105,15 @@ class RutinasViewModel @Inject constructor(
         _estado.value = actual.copy(datos = nuevos)
     }
 
-    /** Muestra el diálogo de confirmación para reemplazar la rutina activa. */
+    // ─── Gestión de la rutina activa ──────────────────────────────────────────
+
+    /** Muestra el diálogo de confirmación para crear una nueva rutina. */
     fun pedirNuevaRutina() {
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
         _estado.value = actual.copy(mostrandoDialogoNueva = true)
     }
 
-    /** Cierra el diálogo de confirmación sin hacer nada. */
+    /** Cierra el diálogo de nueva rutina sin hacer nada. */
     fun cancelarNuevaRutina() {
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
         _estado.value = actual.copy(mostrandoDialogoNueva = false)
@@ -114,17 +124,91 @@ class RutinasViewModel @Inject constructor(
         iniciarCuestionario()
     }
 
+    // ─── Gestión del historial de rutinas ────────────────────────────────────
+
+    /**
+     * Activa una rutina guardada anteriormente.
+     * Desactiva la actual, marca la seleccionada como activa y carga sus días.
+     */
+    fun activarRutina(rutina: RutinaUsuario) {
+        viewModelScope.launch {
+            _estado.value = EstadoRutinas.Cargando
+            try {
+                val userId = supabase.auth.currentUserOrNull()?.id
+                    ?: throw Exception("No hay sesión activa.")
+
+                rutinasRepositorio.desactivarRutinaActiva(userId).getOrThrow()
+                rutinasRepositorio.marcarRutinaActiva(rutina.id).getOrThrow()
+
+                val dias = rutinasRepositorio.obtenerDiasDeRutina(rutina.id).getOrThrow()
+                val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
+
+                Log.d("RutinasViewModel", "Rutina '${rutina.id}' activada. ${dias.size} días cargados.")
+                _estado.value = EstadoRutinas.RutinaActiva(
+                    cabecera = rutina.copy(activa = true),
+                    dias = dias,
+                    todasLasRutinas = todas
+                )
+            } catch (e: Exception) {
+                Log.e("RutinasViewModel", "Error al activar rutina: ${e.message}")
+                cargarRutinaActiva()
+            }
+        }
+    }
+
+    /** Abre el diálogo de confirmación para eliminar una rutina concreta. */
+    fun pedirEliminarRutina(rutina: RutinaUsuario) {
+        val actual = _estado.value
+        _estado.value = when (actual) {
+            is EstadoRutinas.RutinaActiva -> actual.copy(rutinaParaEliminar = rutina)
+            is EstadoRutinas.SinRutina -> actual.copy(rutinaParaEliminar = rutina)
+            else -> actual
+        }
+    }
+
+    /** Cierra el diálogo de eliminación sin hacer nada. */
+    fun cancelarEliminarRutina() {
+        val actual = _estado.value
+        _estado.value = when (actual) {
+            is EstadoRutinas.RutinaActiva -> actual.copy(rutinaParaEliminar = null)
+            is EstadoRutinas.SinRutina -> actual.copy(rutinaParaEliminar = null)
+            else -> actual
+        }
+    }
+
+    /** Ejecuta la eliminación permanente de la rutina confirmada y recarga el estado. */
+    fun confirmarEliminarRutina() {
+        val rutinaAEliminar = when (val actual = _estado.value) {
+            is EstadoRutinas.RutinaActiva -> actual.rutinaParaEliminar
+            is EstadoRutinas.SinRutina -> actual.rutinaParaEliminar
+            else -> null
+        } ?: return
+
+        viewModelScope.launch {
+            try {
+                rutinasRepositorio.eliminarRutina(rutinaAEliminar.id).getOrThrow()
+                Log.d("RutinasViewModel", "Rutina '${rutinaAEliminar.id}' eliminada.")
+                cargarRutinaActiva()
+            } catch (e: Exception) {
+                Log.e("RutinasViewModel", "Error al eliminar rutina: ${e.message}")
+                cancelarEliminarRutina()
+            }
+        }
+    }
+
+    // ─── Algoritmo de generación ──────────────────────────────────────────────
+
     /**
      * Ejecuta el algoritmo de generación y persiste el resultado en Supabase.
      *
      * Proceso:
-     * 1. Mapa experiencia → niveles permitidos.
-     * 2. Mapa lugar → equipos disponibles.
+     * 1. Experiencia → niveles permitidos.
+     * 2. Lugar → equipos disponibles.
      * 3. Carga y filtra ejercicios del catálogo.
      * 4. Aplica el split de días correspondiente.
-     * 5. Para cada día, selecciona ejercicios (más en músculos prioritarios).
-     * 6. Asigna series/reps según el objetivo del usuario.
-     * 7. Desactiva la rutina anterior y guarda la nueva en Supabase.
+     * 5. Selecciona ejercicios (más en músculos prioritarios).
+     * 6. Asigna series/reps según el objetivo.
+     * 7. Desactiva rutina anterior y guarda la nueva.
      */
     private fun generarYGuardarRutina(datos: DatosCuestionario) {
         viewModelScope.launch {
@@ -136,7 +220,7 @@ class RutinasViewModel @Inject constructor(
                 val niveles = experienciaANiveles(datos.experiencia)
                 val equipos = lugarAEquipos(datos.lugarEntrenamiento)
 
-                Log.d("RutinasViewModel", "Generando rutina: ${datos.diasSemana}d, obj=${datos.objetivo}, niveles=$niveles, equipos=$equipos")
+                Log.d("RutinasViewModel", "Generando: ${datos.diasSemana}d, obj=${datos.objetivo}, niveles=$niveles, equipos=$equipos")
 
                 val ejercicios = rutinasRepositorio.obtenerEjercicios(equipos, niveles)
                     .getOrDefault(emptyList())
@@ -144,7 +228,6 @@ class RutinasViewModel @Inject constructor(
                 val porGrupo = ejercicios.groupBy { it.grupoMuscular }
                 val split = obtenerSplit(datos.diasSemana)
                 val (series, reps) = seriesRepsPorObjetivo(datos.objetivo)
-
                 val rutinaId = UUID.randomUUID().toString()
 
                 val dias = split.mapIndexed { index, (nombreDia, musculos) ->
@@ -182,8 +265,9 @@ class RutinasViewModel @Inject constructor(
                 rutinasRepositorio.desactivarRutinaActiva(userId)
                 rutinasRepositorio.guardarRutina(rutina, dias).getOrThrow()
 
-                Log.d("RutinasViewModel", "Rutina generada y guardada: $rutinaId con ${dias.size} días.")
-                _estado.value = EstadoRutinas.RutinaActiva(rutina, dias)
+                val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
+                Log.d("RutinasViewModel", "Rutina $rutinaId generada y guardada.")
+                _estado.value = EstadoRutinas.RutinaActiva(rutina, dias, todasLasRutinas = todas)
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al generar la rutina: ${e.message}")
                 _estado.value = EstadoRutinas.Error("No se pudo generar tu rutina. Inténtalo de nuevo.")
@@ -191,31 +275,23 @@ class RutinasViewModel @Inject constructor(
         }
     }
 
-    /** Traduce el nivel de experiencia del usuario a los niveles de dificultad permitidos. */
+    // ─── Mapas auxiliares del algoritmo ──────────────────────────────────────
+
     private fun experienciaANiveles(experiencia: String): List<String> = when (experiencia) {
         "Nunca he entrenado", "Menos de 1 mes", "1 a 3 meses" -> listOf("Principiante")
         "3 a 6 meses", "6 a 12 meses" -> listOf("Principiante", "Intermedio")
         else -> listOf("Principiante", "Intermedio", "Avanzado")
     }
 
-    /** Traduce el lugar de entrenamiento a los tipos de equipamiento disponibles. */
     private fun lugarAEquipos(lugar: String): List<String> = when (lugar) {
         "Casa" -> listOf("Calistenia", "Mancuernas")
         "Calle" -> listOf("Calistenia")
         "Gimnasio mediano" -> listOf("Barra", "Mancuernas", "Cable", "Calistenia")
         "Gimnasio pequeño" -> listOf("Mancuernas", "Cable", "Calistenia")
         "Mixto" -> listOf("Calistenia", "Mancuernas", "Barra", "Cable")
-        else -> listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia") // Gimnasio grande
+        else -> listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia")
     }
 
-    /**
-     * Devuelve el split (lista de días con sus grupos musculares) según el número de días.
-     * - 2 días: Full Body A/B
-     * - 3 días: Push / Pull / Piernas
-     * - 4 días: Upper A / Lower A / Upper B / Lower B
-     * - 5 días: Torso dividido + Piernas
-     * - 6 días: PPL × 2
-     */
     private fun obtenerSplit(dias: Int): List<Pair<String, List<String>>> = when (dias) {
         2 -> listOf(
             "Full Body A" to listOf("Pecho", "Espalda", "Hombros", "Cuádriceps"),
@@ -249,12 +325,6 @@ class RutinasViewModel @Inject constructor(
         )
     }
 
-    /**
-     * Devuelve el volumen óptimo (series × repeticiones) según el objetivo calórico.
-     * - Déficit: más reps para preservar músculo con menor carga articular.
-     * - Mantenimiento: rango híbrido de fuerza-hipertrofia.
-     * - Superávit: más peso y menos reps para estimular crecimiento máximo.
-     */
     private fun seriesRepsPorObjetivo(objetivo: String): Pair<Int, String> = when (objetivo) {
         "Déficit" -> 3 to "12-15"
         "Superávit" -> 4 to "6-10"
@@ -262,24 +332,32 @@ class RutinasViewModel @Inject constructor(
     }
 }
 
-/** Estados posibles de la pantalla de Rutinas a lo largo de su ciclo de vida. */
+// ─── Estados ──────────────────────────────────────────────────────────────────
+
 sealed class EstadoRutinas {
     object Cargando : EstadoRutinas()
-    object SinRutina : EstadoRutinas()
+
+    /** No hay rutina activa, pero puede haber rutinas guardadas anteriores. */
+    data class SinRutina(
+        val todasLasRutinas: List<RutinaUsuario> = emptyList(),
+        val rutinaParaEliminar: RutinaUsuario? = null
+    ) : EstadoRutinas()
+
     data class EnCuestionario(val paso: Int, val datos: DatosCuestionario) : EstadoRutinas()
+
     object Generando : EstadoRutinas()
+
     data class RutinaActiva(
         val cabecera: RutinaUsuario,
         val dias: List<DiaRutina>,
-        val mostrandoDialogoNueva: Boolean = false
+        val todasLasRutinas: List<RutinaUsuario> = emptyList(),
+        val mostrandoDialogoNueva: Boolean = false,
+        val rutinaParaEliminar: RutinaUsuario? = null
     ) : EstadoRutinas()
+
     data class Error(val mensaje: String) : EstadoRutinas()
 }
 
-/**
- * Datos recogidos a lo largo del cuestionario de generación de rutinas.
- * Todos los campos tienen valores por defecto sensatos para minimizar la fricción del usuario.
- */
 data class DatosCuestionario(
     val objetivo: String = "Mantenimiento",
     val diasSemana: Int = 3,
