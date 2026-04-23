@@ -114,7 +114,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             onSiguiente = viewModel::siguientePaso,
             onAtras = viewModel::anteriorPaso
         )
-        is EstadoRutinas.Generando -> PantallaGenerando()
+        is EstadoRutinas.Generando -> PantallaGenerando(mensaje = s.mensaje)
         is EstadoRutinas.RutinaActiva -> PantallaRutinaActiva(
             cabecera = s.cabecera,
             dias = s.dias,
@@ -384,14 +384,14 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
 // ─────────────────────────────────────────────
 
 @Composable
-private fun PantallaGenerando() {
+private fun PantallaGenerando(mensaje: String = "Generando tu rutina...") {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(modifier = Modifier.size(56.dp))
             Spacer(modifier = Modifier.height(20.dp))
-            Text("Generando tu rutina...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(mensaje, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Personalizando ejercicios y volumen", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Puede tardar unos segundos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
