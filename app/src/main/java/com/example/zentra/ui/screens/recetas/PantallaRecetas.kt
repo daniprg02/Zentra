@@ -174,7 +174,7 @@ fun PantallaRecetas(
     // El BottomSheet se renderiza fuera del Box para que cubra toda la pantalla correctamente
     if (estado.mostrandoFormulario) {
         ModalBottomSheet(
-            onDismissRequest = {},
+            onDismissRequest = { viewModel.ocultarFormulario() },
             sheetState = rememberModalBottomSheetState(
                 skipPartiallyExpanded = true,
                 confirmValueChange = { it != SheetValue.Hidden }

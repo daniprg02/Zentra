@@ -152,8 +152,8 @@ fun PantallaCalculadora(
 
     if (estado.slotActivo != null) {
         ModalBottomSheet(
-            // No cerrar al tocar fuera ni al hacer swipe — solo con la X o al añadir un alimento
-            onDismissRequest = {},
+            // Swipe bloqueado para no cerrar accidentalmente al hacer scroll; tap en scrim sí cierra
+            onDismissRequest = { viewModel.cerrarSlot() },
             sheetState = rememberModalBottomSheetState(
                 skipPartiallyExpanded = true,
                 confirmValueChange = { it != SheetValue.Hidden }
