@@ -162,4 +162,16 @@ class RutinasRepositorioImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun actualizarDiaRutina(dia: DiaRutina): Result<Unit> {
+        return try {
+            // Upsert sobre la primary key id: actualiza el registro existente con la nueva lista de ejercicios
+            supabase.from("routine_days").upsert(dia.asDto())
+            Log.d("RutinasRepositorioImpl", "Día ${dia.id} actualizado con ${dia.ejercicios.size} ejercicios.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("RutinasRepositorioImpl", "Error al actualizar el día ${dia.id}: ${e.message}")
+            Result.failure(e)
+        }
+    }
 }

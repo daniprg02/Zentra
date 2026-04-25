@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,14 +25,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -47,6 +51,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -57,13 +62,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -88,8 +96,14 @@ private val OPCIONES_EXPERIENCIA = listOf(
     "3 a 6 meses", "6 a 12 meses", "Más de 1 año"
 )
 
+// Opciones principales de lugar. Mixto activa la selección secundaria de hasta 2 lugares.
 private val OPCIONES_LUGAR = listOf(
     "Casa", "Calle", "Gimnasio grande", "Gimnasio mediano", "Gimnasio pequeño", "Mixto"
+)
+
+// Lugares disponibles para combinar cuando se elige Mixto
+private val OPCIONES_LUGAR_MIXTO = listOf(
+    "Casa", "Calle", "Gimnasio grande", "Gimnasio mediano", "Gimnasio pequeño"
 )
 
 @Composable
@@ -98,6 +112,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
 
     when (val s = estado) {
         is EstadoRutinas.Cargando -> PantallaCargando()
+
         is EstadoRutinas.SinRutina -> PantallaSinRutina(
             todasLasRutinas = s.todasLasRutinas,
             rutinaParaEliminar = s.rutinaParaEliminar,
@@ -107,14 +122,18 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             onCancelarEliminar = viewModel::cancelarEliminarRutina,
             onConfirmarEliminar = viewModel::confirmarEliminarRutina
         )
+
         is EstadoRutinas.EnCuestionario -> PantallaCuestionario(
             paso = s.paso,
             datos = s.datos,
+            sexo = s.sexo,
             onActualizar = viewModel::actualizarDatos,
             onSiguiente = viewModel::siguientePaso,
             onAtras = viewModel::anteriorPaso
         )
+
         is EstadoRutinas.Generando -> PantallaGenerando(mensaje = s.mensaje)
+
         is EstadoRutinas.RutinaActiva -> PantallaRutinaActiva(
             cabecera = s.cabecera,
             dias = s.dias,
@@ -122,14 +141,21 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             sexo = s.sexo,
             mostrandoDialogoNueva = s.mostrandoDialogoNueva,
             rutinaParaEliminar = s.rutinaParaEliminar,
+            ejercicioEditando = s.ejercicioEditando,
+            sustitucionEnCurso = s.sustitucionEnCurso,
             onPedirNuevaRutina = viewModel::pedirNuevaRutina,
             onCancelarNuevaRutina = viewModel::cancelarNuevaRutina,
             onConfirmarNuevaRutina = viewModel::confirmarNuevaRutina,
             onActivarRutina = viewModel::activarRutina,
             onPedirEliminar = viewModel::pedirEliminarRutina,
             onCancelarEliminar = viewModel::cancelarEliminarRutina,
-            onConfirmarEliminar = viewModel::confirmarEliminarRutina
+            onConfirmarEliminar = viewModel::confirmarEliminarRutina,
+            onIniciarEdicion = viewModel::iniciarEdicionEjercicio,
+            onCancelarEdicion = viewModel::cancelarEdicionEjercicio,
+            onGuardarEdicion = viewModel::guardarEdicionEjercicio,
+            onSustituirConIA = viewModel::sustituirEjercicioConIA
         )
+
         is EstadoRutinas.Error -> PantallaError(
             mensaje = s.mensaje,
             onReintentar = viewModel::cargarRutinaActiva
@@ -170,8 +196,7 @@ private fun PantallaSinRutina(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.Outlined.FitnessCenter,
-                        contentDescription = null,
+                        Icons.Outlined.FitnessCenter, contentDescription = null,
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -221,13 +246,14 @@ private fun PantallaSinRutina(
 }
 
 // ─────────────────────────────────────────────
-// Cuestionario de generación
+// Cuestionario de generación (3 pasos)
 // ─────────────────────────────────────────────
 
 @Composable
 private fun PantallaCuestionario(
     paso: Int,
     datos: DatosCuestionario,
+    sexo: String,
     onActualizar: (DatosCuestionario) -> Unit,
     onSiguiente: () -> Unit,
     onAtras: () -> Unit
@@ -245,10 +271,11 @@ private fun PantallaCuestionario(
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
+                .imePadding()
         ) {
             when (paso) {
                 1 -> PasoDiasYObjetivo(datos = datos, onActualizar = onActualizar)
-                2 -> PasoMusculosPrioritarios(datos = datos, onActualizar = onActualizar)
+                2 -> PasoMusculosPrioritarios(datos = datos, sexo = sexo, onActualizar = onActualizar)
                 3 -> PasoExperienciaYLugar(datos = datos, onActualizar = onActualizar)
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -300,7 +327,16 @@ private fun PasoDiasYObjetivo(datos: DatosCuestionario, onActualizar: (DatosCues
 }
 
 @Composable
-private fun PasoMusculosPrioritarios(datos: DatosCuestionario, onActualizar: (DatosCuestionario) -> Unit) {
+private fun PasoMusculosPrioritarios(
+    datos: DatosCuestionario,
+    sexo: String,
+    onActualizar: (DatosCuestionario) -> Unit
+) {
+    // Para el diagrama, los músculos seleccionados se muestran al máximo de intensidad
+    val frecuenciaParaDiagrama = remember(datos.musculosPrioritarios) {
+        datos.musculosPrioritarios.associateWith { 5 }
+    }
+
     Column {
         Text("¿Qué músculos quieres priorizar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(4.dp))
@@ -310,6 +346,24 @@ private fun PasoMusculosPrioritarios(datos: DatosCuestionario, onActualizar: (Da
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Diagrama anatómico que resalta en tiempo real los músculos seleccionados
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            DiagramaCuerpoHumano(
+                musculosFrecuencia = frecuenciaParaDiagrama,
+                sexo = sexo,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 14.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         TODOS_LOS_MUSCULOS.chunked(2).forEach { fila ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 fila.forEach { musculo ->
@@ -343,11 +397,16 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
         OPCIONES_EXPERIENCIA.forEach { opcion ->
             val sel = datos.experiencia == opcion
             Surface(
-                modifier = Modifier.fillMaxWidth().clickable { onActualizar(datos.copy(experiencia = opcion)) }.padding(vertical = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .clickable { onActualizar(datos.copy(experiencia = opcion)) }
+                    .padding(vertical = 2.dp),
                 shape = RoundedCornerShape(8.dp),
                 color = if (sel) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
             ) {
-                Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         opcion,
                         style = MaterialTheme.typography.bodyMedium,
@@ -358,17 +417,30 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
                 }
             }
         }
+
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(24.dp))
+
         Text("¿Dónde vas a entrenar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(12.dp))
+
+        // Chips de selección principal de lugar
         OPCIONES_LUGAR.chunked(2).forEach { fila ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 fila.forEach { lugar ->
                     FilterChip(
                         selected = datos.lugarEntrenamiento == lugar,
-                        onClick = { onActualizar(datos.copy(lugarEntrenamiento = lugar)) },
+                        onClick = {
+                            // Al cambiar de lugar: limpia el material y las selecciones de Mixto
+                            onActualizar(
+                                datos.copy(
+                                    lugarEntrenamiento = lugar,
+                                    materialDisponible = "",
+                                    lugaresSeleccionados = emptyList()
+                                )
+                            )
+                        },
                         label = { Text(lugar) },
                         modifier = Modifier.weight(1f)
                     )
@@ -376,6 +448,65 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
                 if (fila.size < 2) Spacer(modifier = Modifier.weight(1f))
             }
             Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Campo de material si entrena en casa o en la calle
+        if (datos.lugarEntrenamiento == "Casa" || datos.lugarEntrenamiento == "Calle") {
+            Spacer(modifier = Modifier.height(8.dp))
+            val placeholder = if (datos.lugarEntrenamiento == "Casa")
+                "Ej: mancuernas, goma elástica, esterilla..."
+            else
+                "Ej: barras de dominadas, anillas... o deja vacío si no tienes"
+            val label = if (datos.lugarEntrenamiento == "Casa")
+                "¿Qué material tienes disponible?"
+            else
+                "¿Tienes algún equipamiento?"
+            OutlinedTextField(
+                value = datos.materialDisponible,
+                onValueChange = { onActualizar(datos.copy(materialDisponible = it)) },
+                label = { Text(label) },
+                placeholder = { Text(placeholder, style = MaterialTheme.typography.bodySmall) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                maxLines = 3,
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+
+        // Selección secundaria para Mixto: hasta 2 lugares, numerados con "1" y "2"
+        if (datos.lugarEntrenamiento == "Mixto") {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Selecciona hasta 2 lugares:",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OPCIONES_LUGAR_MIXTO.chunked(2).forEach { fila ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    fila.forEach { lugar ->
+                        val idx = datos.lugaresSeleccionados.indexOf(lugar)
+                        val seleccionado = idx >= 0
+                        val badge = when (idx) { 0 -> " ①"; 1 -> " ②"; else -> "" }
+                        FilterChip(
+                            selected = seleccionado,
+                            onClick = {
+                                val nuevos = datos.lugaresSeleccionados.toMutableList()
+                                if (seleccionado) {
+                                    nuevos.remove(lugar)
+                                } else if (nuevos.size < 2) {
+                                    nuevos.add(lugar)
+                                }
+                                onActualizar(datos.copy(lugaresSeleccionados = nuevos))
+                            },
+                            label = { Text(lugar + badge) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (fila.size < 2) Spacer(modifier = Modifier.weight(1f))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
         }
     }
 }
@@ -398,7 +529,7 @@ private fun PantallaGenerando(mensaje: String = "Generando tu rutina...") {
 }
 
 // ─────────────────────────────────────────────
-// Rutina activa + historial de rutinas
+// Rutina activa + historial
 // ─────────────────────────────────────────────
 
 @Composable
@@ -409,15 +540,26 @@ private fun PantallaRutinaActiva(
     sexo: String,
     mostrandoDialogoNueva: Boolean,
     rutinaParaEliminar: RutinaUsuario?,
+    ejercicioEditando: EjercicioEditando?,
+    sustitucionEnCurso: Pair<Int, Int>?,
     onPedirNuevaRutina: () -> Unit,
     onCancelarNuevaRutina: () -> Unit,
     onConfirmarNuevaRutina: () -> Unit,
     onActivarRutina: (RutinaUsuario) -> Unit,
     onPedirEliminar: (RutinaUsuario) -> Unit,
     onCancelarEliminar: () -> Unit,
-    onConfirmarEliminar: () -> Unit
+    onConfirmarEliminar: () -> Unit,
+    onIniciarEdicion: (diaNumero: Int, ejercicioIdx: Int) -> Unit,
+    onCancelarEdicion: () -> Unit,
+    onGuardarEdicion: (series: Int, reps: String) -> Unit,
+    onSustituirConIA: (diaNumero: Int, ejercicioIdx: Int) -> Unit
 ) {
     val expandidos = remember { mutableStateMapOf<Int, Boolean>() }
+
+    val musculosFrecuencia = remember(dias) {
+        dias.flatMap { dia -> dia.ejercicios.map { it.grupoMuscular } }
+            .groupingBy { it }.eachCount()
+    }
 
     if (mostrandoDialogoNueva) {
         AlertDialog(
@@ -439,7 +581,12 @@ private fun PantallaRutinaActiva(
         onConfirmar = onConfirmarEliminar
     )
 
-    // Rutinas anteriores (excluye la activa actual)
+    DialogoEditarEjercicio(
+        edicion = ejercicioEditando,
+        onCancelar = onCancelarEdicion,
+        onGuardar = onGuardarEdicion
+    )
+
     val rutinasAnteriores = todasLasRutinas.filter { it.id != cabecera.id }
 
     Scaffold(
@@ -458,20 +605,17 @@ private fun PantallaRutinaActiva(
         ) {
             item { CabeceraPlan(cabecera = cabecera) }
 
+            // Diagrama anatómico con las imágenes PNG reales
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     DiagramaCuerpoHumano(
-                        dias = dias,
+                        musculosFrecuencia = musculosFrecuencia,
                         sexo = sexo,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp)
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
                     )
                 }
             }
@@ -482,11 +626,13 @@ private fun PantallaRutinaActiva(
                     dia = dia,
                     colorAccento = COLORES_DIA[(dia.diaNumero - 1) % COLORES_DIA.size],
                     expandido = expandido,
-                    onToggle = { expandidos[dia.diaNumero] = !expandido }
+                    sustitucionEnCurso = sustitucionEnCurso,
+                    onToggle = { expandidos[dia.diaNumero] = !expandido },
+                    onIniciarEdicion = { ejercicioIdx -> onIniciarEdicion(dia.diaNumero, ejercicioIdx) },
+                    onSustituirConIA = { ejercicioIdx -> onSustituirConIA(dia.diaNumero, ejercicioIdx) }
                 )
             }
 
-            // Sección de rutinas anteriores
             if (rutinasAnteriores.isNotEmpty()) {
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -523,10 +669,7 @@ private fun TarjetaRutinaHistorial(
     onActivar: () -> Unit,
     onEliminar: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -545,43 +688,23 @@ private fun TarjetaRutinaHistorial(
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Plan de ${rutina.diasSemana} días",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    rutina.objetivo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("Plan de ${rutina.diasSemana} días", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(rutina.objetivo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!esActiva) {
-                TextButton(
-                    onClick = onActivar,
-                    contentPadding = PaddingValues(horizontal = 8.dp)
-                ) {
+                TextButton(onClick = onActivar, contentPadding = PaddingValues(horizontal = 8.dp)) {
                     Text("Activar", style = MaterialTheme.typography.labelMedium)
                 }
             }
             IconButton(onClick = onEliminar) {
-                Icon(
-                    Icons.Outlined.Delete,
-                    contentDescription = "Eliminar rutina",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Outlined.Delete, contentDescription = "Eliminar rutina", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
             }
         }
     }
 }
 
 @Composable
-private fun DialogoEliminarRutina(
-    rutina: RutinaUsuario?,
-    onCancelar: () -> Unit,
-    onConfirmar: () -> Unit
-) {
+private fun DialogoEliminarRutina(rutina: RutinaUsuario?, onCancelar: () -> Unit, onConfirmar: () -> Unit) {
     if (rutina == null) return
     AlertDialog(
         onDismissRequest = onCancelar,
@@ -590,6 +713,63 @@ private fun DialogoEliminarRutina(
         confirmButton = {
             TextButton(onClick = onConfirmar) {
                 Text("Sí, eliminar", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
+    )
+}
+
+/**
+ * Diálogo para editar las series y repeticiones de un ejercicio concreto.
+ * Mantiene estado local hasta que el usuario pulsa Guardar.
+ */
+@Composable
+private fun DialogoEditarEjercicio(
+    edicion: EjercicioEditando?,
+    onCancelar: () -> Unit,
+    onGuardar: (series: Int, reps: String) -> Unit
+) {
+    if (edicion == null) return
+
+    var seriesLocal by remember(edicion) { mutableStateOf(edicion.series) }
+    var repsLocal by remember(edicion) { mutableStateOf(edicion.repeticiones) }
+
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        title = { Text("Editar ejercicio") },
+        text = {
+            Column {
+                Text(edicion.nombreEjercicio, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(16.dp))
+
+                Text("Series:", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (1..6).forEach { n ->
+                        FilterChip(
+                            selected = seriesLocal == n,
+                            onClick = { seriesLocal = n },
+                            label = { Text("$n") }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = repsLocal,
+                    onValueChange = { repsLocal = it },
+                    label = { Text("Repeticiones") },
+                    placeholder = { Text("Ej: 8-12, 15, 10-15") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onGuardar(seriesLocal, repsLocal) }) {
+                Text("Guardar")
             }
         },
         dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
@@ -632,7 +812,10 @@ private fun TarjetaDia(
     dia: DiaRutina,
     colorAccento: Color,
     expandido: Boolean,
-    onToggle: () -> Unit
+    sustitucionEnCurso: Pair<Int, Int>?,
+    onToggle: () -> Unit,
+    onIniciarEdicion: (ejercicioIdx: Int) -> Unit,
+    onSustituirConIA: (ejercicioIdx: Int) -> Unit
 ) {
     val rotacion by animateFloatAsState(
         targetValue = if (expandido) 180f else 0f,
@@ -658,17 +841,24 @@ private fun TarjetaDia(
                 }
                 Text("${dia.ejercicios.size} ejercicios", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.rotate(rotacion),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.rotate(rotacion), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             AnimatedVisibility(visible = expandido, enter = expandVertically(tween(200)), exit = shrinkVertically(tween(200))) {
                 Column {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    dia.ejercicios.forEach { ej -> ItemEjercicio(ejercicio = ej, colorAccento = colorAccento) }
+                    dia.ejercicios.forEachIndexed { idx, ej ->
+                        val esSustituyendo = sustitucionEnCurso != null &&
+                            sustitucionEnCurso.first == dia.diaNumero &&
+                            sustitucionEnCurso.second == idx
+                        ItemEjercicio(
+                            ejercicio = ej,
+                            ejercicioIdx = idx,
+                            colorAccento = colorAccento,
+                            esSustituyendo = esSustituyendo,
+                            onEditar = { onIniciarEdicion(idx) },
+                            onSustituir = { onSustituirConIA(idx) }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -677,7 +867,14 @@ private fun TarjetaDia(
 }
 
 @Composable
-private fun ItemEjercicio(ejercicio: EjercicioEnRutina, colorAccento: Color) {
+private fun ItemEjercicio(
+    ejercicio: EjercicioEnRutina,
+    ejercicioIdx: Int,
+    colorAccento: Color,
+    esSustituyendo: Boolean,
+    onEditar: () -> Unit,
+    onSustituir: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -688,12 +885,36 @@ private fun ItemEjercicio(ejercicio: EjercicioEnRutina, colorAccento: Color) {
             Text(ejercicio.nombre, style = MaterialTheme.typography.bodyMedium)
             Text(ejercicio.grupoMuscular, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(
-            "${ejercicio.series} × ${ejercicio.repeticiones}",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = colorAccento
-        )
+        if (esSustituyendo) {
+            // Spinner mientras la IA genera el sustituto
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colorAccento)
+        } else {
+            Text(
+                "${ejercicio.series} × ${ejercicio.repeticiones}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colorAccento
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            // Editar series/repeticiones
+            IconButton(onClick = onEditar, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Outlined.Edit,
+                    contentDescription = "Editar series y repeticiones",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // Sustituir por otro ejercicio del mismo grupo con IA
+            IconButton(onClick = onSustituir, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Outlined.Sync,
+                    contentDescription = "Sustituir ejercicio con IA",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

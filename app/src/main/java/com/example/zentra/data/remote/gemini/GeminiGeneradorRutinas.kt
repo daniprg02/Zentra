@@ -35,9 +35,9 @@ private data class EjercicioGemini(
 )
 
 /**
- * Llama a la API REST de Gemini para generar un plan de entrenamiento personalizado.
- * Devuelve null si la petición falla o la respuesta no es válida; el ViewModel
- * usará el algoritmo local como fallback.
+ * Llama a la API REST de Gemini para generar y para sustituir ejercicios.
+ * Devuelve null si la petición falla o la respuesta no es válida; en ese caso,
+ * el ViewModel usa el algoritmo local como fallback.
  */
 class GeminiGeneradorRutinas @Inject constructor(
     private val geminiService: GeminiApiService
@@ -69,11 +69,7 @@ class GeminiGeneradorRutinas @Inject constructor(
             )
 
             val texto = respuesta.candidates
-                ?.firstOrNull()
-                ?.content
-                ?.parts
-                ?.firstOrNull()
-                ?.text
+                ?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 ?: run {
                     Log.w("GeminiGeneradorRutinas", "Respuesta vacía de Gemini.")
                     return null
@@ -85,7 +81,7 @@ class GeminiGeneradorRutinas @Inject constructor(
             val respuestaGemini = json.decodeFromString<RespuestaGemini>(jsonLimpio)
 
             if (respuestaGemini.dias.size != datos.diasSemana) {
-                Log.w("GeminiGeneradorRutinas", "Días incorrectos: ${respuestaGemini.dias.size} vs ${datos.diasSemana} esperados. Fallback.")
+                Log.w("GeminiGeneradorRutinas", "Días incorrectos: ${respuestaGemini.dias.size} vs ${datos.diasSemana}. Fallback.")
                 return null
             }
 
@@ -115,11 +111,72 @@ class GeminiGeneradorRutinas @Inject constructor(
                 )
             }
 
-            Log.d("GeminiGeneradorRutinas", "Rutina generada por Gemini: ${dias.size} días, ${dias.sumOf { it.ejercicios.size }} ejercicios totales.")
+            Log.d("GeminiGeneradorRutinas", "Rutina generada: ${dias.size} días, ${dias.sumOf { it.ejercicios.size }} ejercicios totales.")
             dias
         } catch (e: Exception) {
             Log.e("GeminiGeneradorRutinas", "Error al generar rutina con Gemini: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Pide a Gemini que elija el mejor sustituto para un ejercicio concreto.
+     * Si falla, el ViewModel usará un candidato aleatorio como fallback.
+     *
+     * @param ejercicioActual Nombre del ejercicio a sustituir.
+     * @param grupoMuscular Grupo muscular del ejercicio (para mantener la coherencia del día).
+     * @param candidatos Ejercicios del catálogo del mismo grupo muscular, sin los ya usados en ese día.
+     */
+    suspend fun generarSustituto(
+        ejercicioActual: String,
+        grupoMuscular: String,
+        candidatos: List<Ejercicio>
+    ): Ejercicio? {
+        return try {
+            if (candidatos.isEmpty()) return null
+
+            val catalogoStr = candidatos.joinToString("\n") {
+                "- id=\"${it.id}\" | nombre=\"${it.nombre}\""
+            }
+
+            val prompt = """
+Eres un entrenador personal. El usuario quiere sustituir el ejercicio "$ejercicioActual" del grupo muscular "$grupoMuscular".
+Elige el ejercicio más apropiado del siguiente catálogo como sustituto.
+Responde ÚNICAMENTE con el ID del ejercicio elegido (ejemplo: "ex-001"), sin ningún texto adicional.
+
+CATÁLOGO DE $grupoMuscular:
+$catalogoStr
+""".trimIndent()
+
+            val peticion = PeticionGemini(
+                contents = listOf(
+                    ContenidoGeminiReq(parts = listOf(ParteGeminiReq(text = prompt)))
+                )
+            )
+
+            val respuesta = geminiService.generarContenido(
+                modelo = "gemini-2.0-flash-lite",
+                apiKey = BuildConfig.GEMINI_API_KEY,
+                peticion = peticion
+            )
+
+            val idRespuesta = respuesta.candidates
+                ?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?.trim()
+                ?.replace("\"", "")
+                ?.replace(Regex("[^a-zA-Z0-9\\-_]"), "")
+                ?: return candidatos.randomOrNull()
+
+            val encontrado = candidatos.find { it.id == idRespuesta }
+            if (encontrado != null) {
+                Log.d("GeminiGeneradorRutinas", "Sustituto elegido por Gemini: '${encontrado.nombre}'")
+            } else {
+                Log.w("GeminiGeneradorRutinas", "ID '$idRespuesta' no encontrado en candidatos. Usando aleatorio.")
+            }
+            encontrado ?: candidatos.randomOrNull()
+        } catch (e: Exception) {
+            Log.e("GeminiGeneradorRutinas", "Error al generar sustituto: ${e.message}")
+            candidatos.randomOrNull()
         }
     }
 
@@ -131,6 +188,31 @@ class GeminiGeneradorRutinas @Inject constructor(
             "Superávit" -> "4" to "6-10"
             else -> "4" to "8-12"
         }
+        // Límites de ejercicios por día según la experiencia del usuario
+        val (minEj, maxEj) = when (datos.experiencia) {
+            "Nunca he entrenado", "Menos de 1 mes" -> 3 to 4
+            "1 a 3 meses", "3 a 6 meses" -> 4 to 5
+            "6 a 12 meses" -> 5 to 6
+            else -> 6 to 7
+        }
+
+        // Descripción del lugar de entrenamiento, incluyendo el material si lo ha especificado
+        val lugarDescripcion = buildString {
+            append(datos.lugarEntrenamiento)
+            if (datos.lugarEntrenamiento == "Mixto" && datos.lugaresSeleccionados.isNotEmpty()) {
+                append(" (${datos.lugaresSeleccionados.joinToString(" + ")})")
+            }
+        }
+        val materialExtra = when {
+            datos.lugarEntrenamiento == "Casa" && datos.materialDisponible.isNotBlank() ->
+                "\n- Material disponible en casa: ${datos.materialDisponible}"
+            datos.lugarEntrenamiento == "Calle" && datos.materialDisponible.isNotBlank() ->
+                "\n- Equipamiento disponible en calle: ${datos.materialDisponible}"
+            datos.lugarEntrenamiento == "Mixto" && datos.materialDisponible.isNotBlank() ->
+                "\n- Material adicional disponible: ${datos.materialDisponible}"
+            else -> ""
+        }
+
         val catalogoStr = ejercicios.joinToString("\n") {
             "- id=\"${it.id}\" | nombre=\"${it.nombre}\" | grupo=\"${it.grupoMuscular}\""
         }
@@ -142,16 +224,17 @@ PERFIL:
 - Objetivo: ${datos.objetivo} (Déficit=perder grasa, Mantenimiento=mantener, Superávit=ganar músculo)
 - Días/semana: ${datos.diasSemana}
 - Experiencia: ${datos.experiencia}
-- Lugar de entrenamiento: ${datos.lugarEntrenamiento}
+- Lugar de entrenamiento: $lugarDescripcion$materialExtra
 - Músculos prioritarios: $musculosPrioritariosStr
 
 REGLAS DE GENERACIÓN:
 1. Crea EXACTAMENTE ${datos.diasSemana} días.
-2. Cada día: entre 4 y 7 ejercicios.
+2. Cada día: MÍNIMO $minEj ejercicios y MÁXIMO $maxEj ejercicios. Respeta estos límites estrictamente.
 3. Músculos prioritarios: incluye 3 ejercicios. Resto de músculos: 2 ejercicios.
 4. Series para todos los ejercicios: $series | Repeticiones: $reps.
 5. Usa ÚNICAMENTE ejercicios del catálogo (copia el id exactamente, sin modificarlo).
 6. Aplica el split más adecuado para ${datos.diasSemana} días (Full Body, Push/Pull/Legs, Upper/Lower, etc.).
+7. Si el lugar es casa o calle con material específico, prioriza ejercicios compatibles con ese material.
 
 CATÁLOGO DE EJERCICIOS DISPONIBLES:
 $catalogoStr

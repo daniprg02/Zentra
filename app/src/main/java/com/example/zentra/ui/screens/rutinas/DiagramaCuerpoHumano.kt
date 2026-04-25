@@ -1,6 +1,7 @@
 package com.example.zentra.ui.screens.rutinas
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,10 +9,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
@@ -19,43 +23,78 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.zentra.domain.model.DiaRutina
+import androidx.compose.ui.unit.sp
+import com.example.zentra.R
+import kotlinx.coroutines.launch
 
 /**
- * Diagrama anatómico simplificado del cuerpo humano en Canvas.
- * Resalta los grupos musculares según su frecuencia en la rutina activa.
- * Aplica proporciones distintas para perfil masculino y femenino.
+ * Colores identificativos por grupo muscular. Compartidos con la leyenda del diagrama.
+ */
+val COLORES_MUSCULARES: Map<String, Color> = mapOf(
+    "Pecho"          to Color(0xFFEF5350),
+    "Espalda"        to Color(0xFF42A5F5),
+    "Hombros"        to Color(0xFFFFB300),
+    "Bíceps"         to Color(0xFFAB47BC),
+    "Tríceps"        to Color(0xFF5C6BC0),
+    "Core"           to Color(0xFFFDD835),
+    "Cuádriceps"     to Color(0xFF66BB6A),
+    "Isquiotibiales" to Color(0xFF26A69A),
+    "Glúteos"        to Color(0xFFEC407A),
+    "Gemelos"        to Color(0xFF26C6DA)
+)
+
+// Posiciones de los puntos musculares como fracción (x, y) del contenedor, vista frontal.
+private val POSICIONES_FRENTE: Map<String, List<Pair<Float, Float>>> = mapOf(
+    "Hombros"    to listOf(0.27f to 0.21f, 0.73f to 0.21f),
+    "Pecho"      to listOf(0.50f to 0.30f),
+    "Bíceps"     to listOf(0.19f to 0.38f, 0.81f to 0.38f),
+    "Core"       to listOf(0.50f to 0.46f),
+    "Cuádriceps" to listOf(0.37f to 0.64f, 0.63f to 0.64f),
+    "Gemelos"    to listOf(0.37f to 0.83f, 0.63f to 0.83f)
+)
+
+// Posiciones de los puntos musculares, vista trasera.
+private val POSICIONES_ESPALDA: Map<String, List<Pair<Float, Float>>> = mapOf(
+    "Hombros"        to listOf(0.27f to 0.21f, 0.73f to 0.21f),
+    "Espalda"        to listOf(0.50f to 0.34f),
+    "Tríceps"        to listOf(0.19f to 0.38f, 0.81f to 0.38f),
+    "Glúteos"        to listOf(0.40f to 0.56f, 0.60f to 0.56f),
+    "Isquiotibiales" to listOf(0.37f to 0.67f, 0.63f to 0.67f),
+    "Gemelos"        to listOf(0.37f to 0.83f, 0.63f to 0.83f)
+)
+
+/**
+ * Diagrama anatómico del cuerpo humano con imágenes PNG reales.
+ * Superpone círculos de colores sobre cada grupo muscular activo.
+ * Permite deslizar (o pulsar los botones) para cambiar entre vista frontal y trasera.
+ *
+ * @param musculosFrecuencia Mapa de grupo muscular → intensidad (0 = inactivo, ≥1 = activo).
+ *   En el paso de selección, usa valor 5 para los músculos prioritarios elegidos.
+ *   En la pantalla de rutina activa, usa el conteo real de ejercicios por grupo.
+ * @param sexo "Masculino" o "Femenino" para seleccionar la imagen correspondiente.
  */
 @Composable
 fun DiagramaCuerpoHumano(
-    dias: List<DiaRutina>,
+    musculosFrecuencia: Map<String, Int>,
     sexo: String,
     modifier: Modifier = Modifier
 ) {
-    val musculosFrecuencia = remember(dias) {
-        dias.flatMap { dia -> dia.ejercicios.map { it.grupoMuscular } }
-            .groupingBy { it }
-            .eachCount()
-    }
-
-    var vistaFrente by remember { mutableStateOf(true) }
-
-    val bodyColor = MaterialTheme.colorScheme.surfaceContainerHigh
-    val inactiveMuscleColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val primaryColor = MaterialTheme.colorScheme.primary
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val esMasculino = sexo != "Femenino"
+
+    val frenteRes = if (esMasculino) R.drawable.hombre_delante else R.drawable.mujer_delante
+    val espaldaRes = if (esMasculino) R.drawable.hombre_detras else R.drawable.mujer_detras
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
@@ -68,178 +107,128 @@ fun DiagramaCuerpoHumano(
 
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth(0.65f)) {
             SegmentedButton(
-                selected = vistaFrente,
-                onClick = { vistaFrente = true },
+                selected = pagerState.currentPage == 0,
+                onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                 shape = SegmentedButtonDefaults.itemShape(0, 2)
             ) { Text("Frente") }
             SegmentedButton(
-                selected = !vistaFrente,
-                onClick = { vistaFrente = false },
+                selected = pagerState.currentPage == 1,
+                onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 shape = SegmentedButtonDefaults.itemShape(1, 2)
             ) { Text("Espalda") }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
-        Canvas(
+        // Imagen del cuerpo con círculos de músculos superpuestos mediante Canvas
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
-                .fillMaxWidth(0.52f)
-                .aspectRatio(0.48f)
-        ) {
-            val W = size.width
-            val H = size.height
+                .fillMaxWidth(0.62f)
+                .aspectRatio(0.43f)
+        ) { pagina ->
+            val imageRes = if (pagina == 0) frenteRes else espaldaRes
+            val posiciones = if (pagina == 0) POSICIONES_FRENTE else POSICIONES_ESPALDA
 
-            // ── Coordenadas Y (como fracción de H) ─────────────────────────────
-            val headCY = H * 0.065f
-            val headR = H * 0.062f
-            val neckTop = H * 0.13f
-            val neckBot = H * 0.17f
-            val chestTop = H * 0.17f
-            val chestBot = H * 0.30f
-            val coreTop = H * 0.30f
-            val coreBot = H * 0.43f
-            val hipTop = H * 0.43f
-            val hipBot = H * 0.50f
-            val thighTop = H * 0.50f
-            val thighBot = H * 0.73f
-            val calfTop = H * 0.74f
-            val calfBot = H * 0.93f
+            Box {
+                Image(
+                    painter = painterResource(imageRes),
+                    contentDescription = if (pagina == 0) "Vista frontal" else "Vista trasera",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds
+                )
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val W = size.width
+                    val H = size.height
+                    val radio = W * 0.065f
 
-            // ── Coordenadas X según sexo ────────────────────────────────────────
-            val esMasculino = sexo != "Femenino"
-            val torsoLeft = if (esMasculino) W * 0.22f else W * 0.27f
-            val torsoW = if (esMasculino) W * 0.56f else W * 0.46f
-            val armLeft = if (esMasculino) W * 0.03f else W * 0.08f
-            val armW = if (esMasculino) W * 0.17f else W * 0.15f
-            val hipLeft = if (esMasculino) W * 0.24f else W * 0.18f
-            val hipW = if (esMasculino) W * 0.52f else W * 0.64f
-            val thighGap = W * 0.04f
-            val leftThighW = (hipW - thighGap) / 2f
-            val rightThighX = hipLeft + leftThighW + thighGap
-            val calfInset = W * 0.02f
-            val leftCalfW = leftThighW - 2f * calfInset
-
-            val shoulderR = W * if (esMasculino) 0.11f else 0.10f
-            val shoulderCY = chestTop + (chestBot - chestTop) * 0.38f
-            val leftShoulderCX = torsoLeft - shoulderR * 0.15f
-            val rightShoulderCX = torsoLeft + torsoW + shoulderR * 0.15f
-
-            // Función de color: inactivo → gris; activo → primary con alpha por frecuencia
-            fun muscColor(musculo: String): Color {
-                val freq = musculosFrecuencia[musculo] ?: 0
-                return if (freq == 0) inactiveMuscleColor
-                else primaryColor.copy(alpha = (0.45f + freq.coerceAtMost(5) * 0.11f).coerceAtMost(1f))
-            }
-
-            val cr5 = CornerRadius(5.dp.toPx())
-            val cr6 = CornerRadius(6.dp.toPx())
-            val cr8 = CornerRadius(8.dp.toPx())
-
-            // ── Silueta base ───────────────────────────────────────────────────
-            drawCircle(bodyColor, radius = headR, center = Offset(W * 0.5f, headCY))
-            drawRoundRect(bodyColor, Offset(W * 0.43f, neckTop), Size(W * 0.14f, neckBot - neckTop), cr5)
-            drawRoundRect(bodyColor, Offset(torsoLeft, chestTop), Size(torsoW, coreBot - chestTop), cr8)
-            drawRoundRect(bodyColor, Offset(armLeft, chestTop), Size(armW, coreBot - chestTop), cr6)
-            drawRoundRect(bodyColor, Offset(W - armLeft - armW, chestTop), Size(armW, coreBot - chestTop), cr6)
-            drawRoundRect(bodyColor, Offset(hipLeft, hipTop), Size(hipW, hipBot - hipTop), cr6)
-            drawRoundRect(bodyColor, Offset(hipLeft, thighTop), Size(leftThighW, thighBot - thighTop), cr8)
-            drawRoundRect(bodyColor, Offset(rightThighX, thighTop), Size(leftThighW, thighBot - thighTop), cr8)
-            drawRoundRect(bodyColor, Offset(hipLeft + calfInset, calfTop), Size(leftCalfW, calfBot - calfTop), cr6)
-            drawRoundRect(bodyColor, Offset(rightThighX + calfInset, calfTop), Size(leftCalfW, calfBot - calfTop), cr6)
-
-            if (vistaFrente) {
-                // ── Vista frontal ───────────────────────────────────────────────
-                drawCircle(muscColor("Hombros"), shoulderR, Offset(leftShoulderCX, shoulderCY))
-                drawCircle(muscColor("Hombros"), shoulderR, Offset(rightShoulderCX, shoulderCY))
-                drawRoundRect(muscColor("Pecho"),
-                    Offset(torsoLeft + W * 0.01f, chestTop + H * 0.01f),
-                    Size(torsoW - W * 0.02f, chestBot - chestTop - H * 0.015f), cr6)
-                drawRoundRect(muscColor("Bíceps"),
-                    Offset(armLeft, chestTop + H * 0.02f),
-                    Size(armW, (coreBot - chestTop) * 0.55f), cr5)
-                drawRoundRect(muscColor("Bíceps"),
-                    Offset(W - armLeft - armW, chestTop + H * 0.02f),
-                    Size(armW, (coreBot - chestTop) * 0.55f), cr5)
-                drawRoundRect(muscColor("Core"),
-                    Offset(torsoLeft + W * 0.02f, coreTop + H * 0.005f),
-                    Size(torsoW - W * 0.04f, coreBot - coreTop - H * 0.01f), cr6)
-                drawRoundRect(muscColor("Cuádriceps"),
-                    Offset(hipLeft + W * 0.01f, thighTop + H * 0.01f),
-                    Size(leftThighW - W * 0.01f, thighBot - thighTop - H * 0.02f), cr8)
-                drawRoundRect(muscColor("Cuádriceps"),
-                    Offset(rightThighX, thighTop + H * 0.01f),
-                    Size(leftThighW - W * 0.01f, thighBot - thighTop - H * 0.02f), cr8)
-                drawRoundRect(muscColor("Gemelos"),
-                    Offset(hipLeft + calfInset, calfTop + H * 0.01f),
-                    Size(leftCalfW, calfBot - calfTop - H * 0.015f), cr6)
-                drawRoundRect(muscColor("Gemelos"),
-                    Offset(rightThighX + calfInset, calfTop + H * 0.01f),
-                    Size(leftCalfW, calfBot - calfTop - H * 0.015f), cr6)
-            } else {
-                // ── Vista trasera ────────────────────────────────────────────────
-                drawCircle(muscColor("Hombros"), shoulderR, Offset(leftShoulderCX, shoulderCY))
-                drawCircle(muscColor("Hombros"), shoulderR, Offset(rightShoulderCX, shoulderCY))
-                drawRoundRect(muscColor("Espalda"),
-                    Offset(torsoLeft + W * 0.01f, chestTop + H * 0.01f),
-                    Size(torsoW - W * 0.02f, coreBot - chestTop - H * 0.02f), cr6)
-                drawRoundRect(muscColor("Tríceps"),
-                    Offset(armLeft, chestTop + H * 0.02f),
-                    Size(armW, (coreBot - chestTop) * 0.55f), cr5)
-                drawRoundRect(muscColor("Tríceps"),
-                    Offset(W - armLeft - armW, chestTop + H * 0.02f),
-                    Size(armW, (coreBot - chestTop) * 0.55f), cr5)
-                val gluteH = (thighBot - thighTop) * 0.38f
-                drawRoundRect(muscColor("Glúteos"),
-                    Offset(hipLeft + W * 0.01f, thighTop + H * 0.005f),
-                    Size(hipW - W * 0.02f, gluteH), cr8)
-                drawRoundRect(muscColor("Isquiotibiales"),
-                    Offset(hipLeft + W * 0.01f, thighTop + gluteH + H * 0.01f),
-                    Size(leftThighW - W * 0.01f, thighBot - thighTop - gluteH - H * 0.02f), cr8)
-                drawRoundRect(muscColor("Isquiotibiales"),
-                    Offset(rightThighX, thighTop + gluteH + H * 0.01f),
-                    Size(leftThighW - W * 0.01f, thighBot - thighTop - gluteH - H * 0.02f), cr8)
-                drawRoundRect(muscColor("Gemelos"),
-                    Offset(hipLeft + calfInset, calfTop + H * 0.01f),
-                    Size(leftCalfW, calfBot - calfTop - H * 0.015f), cr6)
-                drawRoundRect(muscColor("Gemelos"),
-                    Offset(rightThighX + calfInset, calfTop + H * 0.01f),
-                    Size(leftCalfW, calfBot - calfTop - H * 0.015f), cr6)
+                    posiciones.forEach { (musculo, puntos) ->
+                        val frecuencia = musculosFrecuencia[musculo] ?: 0
+                        if (frecuencia > 0) {
+                            val color = COLORES_MUSCULARES[musculo] ?: Color.Gray
+                            // Alpha progresivo según frecuencia de ejercicios (min 0.72, max 1.0)
+                            val alpha = (0.72f + frecuencia.coerceAtMost(4) * 0.07f).coerceAtMost(1f)
+                            puntos.forEach { (xFrac, yFrac) ->
+                                val cx = W * xFrac
+                                val cy = H * yFrac
+                                // Halo blanco semitransparente para contraste sobre fondo oscuro
+                                drawCircle(
+                                    color = Color.White.copy(alpha = alpha * 0.5f),
+                                    radius = radio + 3.dp.toPx(),
+                                    center = Offset(cx, cy)
+                                )
+                                drawCircle(
+                                    color = color.copy(alpha = alpha),
+                                    radius = radio,
+                                    center = Offset(cx, cy)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // ── Leyenda ────────────────────────────────────────────────────────────
-        val musculosActivos = musculosFrecuencia.entries
-            .filter { it.value > 0 }
-            .sortedByDescending { it.value }
+        // Indicadores de página
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            repeat(2) { idx ->
+                Box(
+                    modifier = Modifier
+                        .size(if (pagerState.currentPage == idx) 8.dp else 5.dp)
+                        .background(
+                            color = if (pagerState.currentPage == idx)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            shape = CircleShape
+                        )
+                )
+            }
+        }
+
+        // Leyenda: muestra únicamente los grupos musculares activos con su color
+        val musculosActivos = COLORES_MUSCULARES.keys.mapNotNull { musculo ->
+            val freq = musculosFrecuencia[musculo] ?: 0
+            if (freq > 0) Triple(musculo, freq, COLORES_MUSCULARES[musculo]!!) else null
+        }.sortedByDescending { it.second }
 
         if (musculosActivos.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
                 "Grupos musculares:",
                 style = MaterialTheme.typography.labelMedium,
                 color = onSurfaceVariant
             )
             Spacer(Modifier.height(6.dp))
-            musculosActivos.forEach { (musculo, freq) ->
-                val alpha = (0.45f + freq.coerceAtMost(5) * 0.11f).coerceAtMost(1f)
+            musculosActivos.chunked(2).forEach { fila ->
                 Row(
-                    modifier = Modifier.fillMaxWidth(0.75f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Start
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(primaryColor.copy(alpha = alpha), CircleShape)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "$musculo · $freq ej.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = onSurfaceVariant
-                    )
+                    fila.forEach { (musculo, freq, color) ->
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(color, CircleShape)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                // En modo rutina activa muestra el conteo; en selección solo el nombre
+                                text = if (freq > 1) "$musculo · $freq ej." else musculo,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 11.sp,
+                                color = onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (fila.size < 2) Spacer(Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(4.dp))
             }
         }
     }

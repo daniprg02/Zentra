@@ -12,7 +12,6 @@ interface IRutinasRepositorio {
 
     /**
      * Obtiene ejercicios del catálogo filtrados por equipamiento y nivel.
-     * Al ser una tabla pequeña (~68 filas), el filtrado se puede hacer en cliente.
      * @param equipos Lista de tipos de equipo disponibles para el usuario.
      * @param niveles Lista de niveles de dificultad acordes a la experiencia.
      * @return [Result] con la lista de [Ejercicio] o el error producido.
@@ -71,4 +70,12 @@ interface IRutinasRepositorio {
      * @return [Result] vacío si la operación es exitosa.
      */
     suspend fun eliminarRutina(rutinaId: String): Result<Unit>
+
+    /**
+     * Actualiza la lista de ejercicios de un día concreto de una rutina.
+     * Se usa al editar series/repeticiones o al sustituir un ejercicio por IA.
+     * @param dia [DiaRutina] con la lista de ejercicios ya modificada.
+     * @return [Result] vacío si la operación es exitosa.
+     */
+    suspend fun actualizarDiaRutina(dia: DiaRutina): Result<Unit>
 }
