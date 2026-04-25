@@ -28,16 +28,23 @@ import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LocalCafe
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -48,20 +55,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,9 +117,14 @@ private val SLOTS_DEL_DIA = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaCalculadora(
+    onLogout: () -> Unit = {},
     viewModel: CalculadoraViewModel = hiltViewModel()
 ) {
     val estado by viewModel.estado.collectAsStateWithLifecycle()
+
+    LaunchedEffect(estado.sesionCerrada) {
+        if (estado.sesionCerrada) onLogout()
+    }
 
     when {
         estado.cargando -> PantallaCargando()
@@ -123,14 +139,26 @@ fun PantallaCalculadora(
             onSlotClick = viewModel::abrirSlot,
             onEliminarReceta = viewModel::eliminarRecetaDeSlot,
             onCambiarFecha = viewModel::cambiarFecha,
-            onVolverAHoy = viewModel::volverAHoy
+            onVolverAHoy = viewModel::volverAHoy,
+            onLogout = viewModel::cerrarSesion,
+            onEditarIngesta = viewModel::abrirEdicionIngesta
         )
+    }
+
+    // El botón físico de retroceso cierra el sheet cuando está abierto
+    BackHandler(enabled = estado.slotActivo != null) {
+        viewModel.cerrarSlot()
     }
 
     if (estado.slotActivo != null) {
         ModalBottomSheet(
-            onDismissRequest = viewModel::cerrarSlot,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            // No cerrar al tocar fuera ni al hacer swipe — solo con la X o al añadir un alimento
+            onDismissRequest = {},
+            sheetState = rememberModalBottomSheetState(
+                skipPartiallyExpanded = true,
+                confirmValueChange = { it != SheetValue.Hidden }
+            ),
+            dragHandle = {}
         ) {
             PickerRecetasParaSlot(
                 nombreSlot = estado.slotActivo!!,
@@ -138,15 +166,69 @@ fun PantallaCalculadora(
                 ingestasActuales = estado.ingestasDelDia[estado.slotActivo!!] ?: emptyList(),
                 cargando = estado.cargandoRecetas,
                 busquedaTexto = estado.busquedaTexto,
+                resultadosLocales = estado.resultadosLocales,
                 resultadosBusqueda = estado.resultadosBusqueda,
                 buscandoAlimento = estado.buscandoAlimento,
                 onRecetaSeleccionada = viewModel::agregarRecetaASlot,
                 onEliminarIngesta = { receta ->
                     viewModel.eliminarRecetaDeSlot(estado.slotActivo!!, receta)
                 },
-                onActualizarBusqueda = viewModel::actualizarBusqueda
+                onActualizarBusqueda = viewModel::actualizarBusqueda,
+                onCerrar = viewModel::cerrarSlot
             )
         }
+    }
+
+    // Diálogo de edición de cantidad (gramos) de una ingesta ya añadida
+    if (estado.ingestaEditando != null) {
+        val edicion = estado.ingestaEditando!!
+        val cantidadFloat = edicion.cantidadTexto.toFloatOrNull()
+        val kcalPreview = cantidadFloat?.let { ((edicion.recetaOriginal.kcalTotales * it) / 100f).toInt() }
+
+        AlertDialog(
+            onDismissRequest = viewModel::cerrarEdicionIngesta,
+            title = {
+                Text(
+                    text = edicion.recetaOriginal.titulo,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Base: ${edicion.recetaOriginal.kcalTotales} kcal / 100 g",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = edicion.cantidadTexto,
+                        onValueChange = viewModel::actualizarCantidadEdicion,
+                        label = { Text("Cantidad (g)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (kcalPreview != null) {
+                        Text(
+                            text = "→ $kcalPreview kcal",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::confirmarEdicionIngesta,
+                    enabled = cantidadFloat != null && cantidadFloat > 0f
+                ) { Text("Aplicar") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cerrarEdicionIngesta) { Text("Cancelar") }
+            }
+        )
     }
 }
 
@@ -161,7 +243,9 @@ private fun ContenidoCalculadora(
     onSlotClick: (String) -> Unit,
     onEliminarReceta: (String, Receta) -> Unit,
     onCambiarFecha: (LocalDate) -> Unit,
-    onVolverAHoy: () -> Unit
+    onVolverAHoy: () -> Unit,
+    onLogout: () -> Unit,
+    onEditarIngesta: (String, Receta) -> Unit
 ) {
     var mostrarDatePicker by remember { mutableStateOf(false) }
 
@@ -247,33 +331,64 @@ private fun ContenidoCalculadora(
             item { Spacer(modifier = Modifier.height(8.dp)) }
 
             item {
-                Column {
-                    Text(
-                        text = "Hola, ${estado.apodo}",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    // Fecha tappable que abre el DatePicker
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { mostrarDatePicker = true }
-                    ) {
+                var mostrarMenuUsuario by remember { mutableStateOf(false) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = fechaFormateada,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (estado.esModoHistorial) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "Hola, ${estado.apodo}",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
                         )
-                        Icon(
-                            imageVector = Icons.Outlined.CalendarMonth,
-                            contentDescription = "Abrir calendario",
-                            modifier = Modifier
-                                .padding(start = 4.dp)
-                                .size(16.dp),
-                            tint = if (estado.esModoHistorial) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        // Fecha tappable que abre el DatePicker
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { mostrarDatePicker = true }
+                        ) {
+                            Text(
+                                text = fechaFormateada,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (estado.esModoHistorial) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Icon(
+                                imageVector = Icons.Outlined.CalendarMonth,
+                                contentDescription = "Abrir calendario",
+                                modifier = Modifier
+                                    .padding(start = 4.dp)
+                                    .size(16.dp),
+                                tint = if (estado.esModoHistorial) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Box {
+                        IconButton(onClick = { mostrarMenuUsuario = true }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Person,
+                                contentDescription = "Perfil",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = mostrarMenuUsuario,
+                            onDismissRequest = { mostrarMenuUsuario = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Cerrar sesión") },
+                                leadingIcon = {
+                                    Icon(Icons.Outlined.ExitToApp, contentDescription = null)
+                                },
+                                onClick = {
+                                    mostrarMenuUsuario = false
+                                    onLogout()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -344,7 +459,8 @@ private fun ContenidoCalculadora(
                         icono = slot.icono,
                         ingestas = estado.ingestasDelDia[slot.nombre] ?: emptyList(),
                         onClick = { onSlotClick(slot.nombre) },
-                        onEliminarReceta = { receta -> onEliminarReceta(slot.nombre, receta) }
+                        onEliminarReceta = { receta -> onEliminarReceta(slot.nombre, receta) },
+                        onEditarIngesta = { receta -> onEditarIngesta(slot.nombre, receta) }
                     )
                 }
             } else {
@@ -373,25 +489,67 @@ private fun PickerRecetasParaSlot(
     ingestasActuales: List<Receta>,
     cargando: Boolean,
     busquedaTexto: String,
+    resultadosLocales: List<Receta>,
     resultadosBusqueda: List<Receta>,
     buscandoAlimento: Boolean,
     onRecetaSeleccionada: (Receta) -> Unit,
     onEliminarIngesta: (Receta) -> Unit,
-    onActualizarBusqueda: (String) -> Unit
+    onActualizarBusqueda: (String) -> Unit,
+    onCerrar: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 4.dp)
     ) {
-        Text(
-            text = "Añadir al $nombreSlot",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Añadir al $nombreSlot",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            IconButton(onClick = onCerrar) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "Cerrar",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Consejo informativo sobre la base de datos
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Lightbulb,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    text = "Los alimentos se proporcionan en cantidades de 100 gramos. Si no encuentras lo que buscas, crea tu propia receta en la pestaña Recetas.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Campo de búsqueda en OpenFoodFacts
         OutlinedTextField(
@@ -420,34 +578,51 @@ private fun PickerRecetasParaSlot(
         Spacer(modifier = Modifier.height(12.dp))
 
         if (busquedaTexto.isNotBlank()) {
-            // Modo búsqueda: muestra resultados de OpenFoodFacts
-            Text(
-                text = "RESULTADOS · OPENFOODFACTS",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (resultadosBusqueda.isEmpty() && !buscandoAlimento) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Sin resultados para \"$busquedaTexto\"",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            // Modo búsqueda: locales (inmediatos) + API (con debounce)
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (resultadosLocales.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "LISTA LOCAL · ZENTRA",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+                    items(resultadosLocales, key = { "local_${it.titulo}" }) { receta ->
+                        ItemRecetaPicker(receta = receta, onClick = { onRecetaSeleccionada(receta) })
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 340.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
+
+                if (resultadosBusqueda.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "OPENFOODFACTS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = if (resultadosLocales.isNotEmpty()) 10.dp else 0.dp, bottom = 6.dp)
+                        )
+                    }
                     items(resultadosBusqueda, key = { it.id }) { receta ->
                         ItemRecetaPicker(receta = receta, onClick = { onRecetaSeleccionada(receta) })
+                    }
+                }
+
+                if (resultadosLocales.isEmpty() && resultadosBusqueda.isEmpty() && !buscandoAlimento) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(100.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Sin resultados para \"$busquedaTexto\"",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -600,7 +775,8 @@ private fun TarjetaSlotComida(
     icono: ImageVector,
     ingestas: List<Receta>,
     onClick: () -> Unit,
-    onEliminarReceta: (Receta) -> Unit
+    onEliminarReceta: (Receta) -> Unit,
+    onEditarIngesta: (Receta) -> Unit
 ) {
     val kcalSlot = ingestas.sumOf { it.kcalTotales }
 
@@ -677,7 +853,7 @@ private fun TarjetaSlotComida(
                 ) {
                     ingestas.forEach { receta ->
                         SuggestionChip(
-                            onClick = {},
+                            onClick = { onEditarIngesta(receta) },
                             label = {
                                 Text(
                                     text = receta.titulo,

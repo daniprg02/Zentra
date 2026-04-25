@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.calculadora
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.buscarEnMasterlist
 import com.example.zentra.data.remote.api.OpenFoodFactsService
 import com.example.zentra.domain.model.MacrosDiarios
 import com.example.zentra.domain.model.NivelActividad
@@ -183,6 +184,7 @@ class CalculadoraViewModel @Inject constructor(
         _estado.value = _estado.value.copy(
             slotActivo = null,
             busquedaTexto = "",
+            resultadosLocales = emptyList(),
             resultadosBusqueda = emptyList(),
             buscandoAlimento = false
         )
@@ -284,14 +286,19 @@ class CalculadoraViewModel @Inject constructor(
     // ─── Búsqueda OpenFoodFacts ────────────────────────────────────────────────
 
     /**
-     * Actualiza el texto de búsqueda y lanza la petición a OpenFoodFacts
-     * con un debounce de 700 ms para evitar llamadas en cada pulsación de tecla.
+     * Actualiza el texto de búsqueda.
+     * - Los resultados locales (masterlist) se calculan de forma inmediata.
+     * - Los resultados de la API de OpenFoodFacts se lanzan con debounce de 700 ms.
      */
     fun actualizarBusqueda(query: String) {
-        _estado.value = _estado.value.copy(busquedaTexto = query, resultadosBusqueda = emptyList())
+        _estado.value = _estado.value.copy(
+            busquedaTexto = query,
+            resultadosBusqueda = emptyList(),
+            resultadosLocales = buscarEnMasterlist(query)
+        )
         busquedaJob?.cancel()
         if (query.isBlank()) {
-            _estado.value = _estado.value.copy(buscandoAlimento = false)
+            _estado.value = _estado.value.copy(buscandoAlimento = false, resultadosLocales = emptyList())
             return
         }
         busquedaJob = viewModelScope.launch {
@@ -304,7 +311,7 @@ class CalculadoraViewModel @Inject constructor(
                     ?.distinctBy { it.titulo.lowercase() }
                     ?.take(10)
                     ?: emptyList()
-                Log.d("CalculadoraViewModel", "${recetas.size} alimentos encontrados para '$query'.")
+                Log.d("CalculadoraViewModel", "${recetas.size} alimentos de API + ${_estado.value.resultadosLocales.size} locales para '$query'.")
                 _estado.value = _estado.value.copy(resultadosBusqueda = recetas, buscandoAlimento = false)
             } catch (e: Exception) {
                 Log.e("CalculadoraViewModel", "Error buscando '$query' en OpenFoodFacts: ${e.message}")
@@ -327,6 +334,100 @@ class CalculadoraViewModel @Inject constructor(
         Log.d("CalculadoraViewModel", "Objetivo físico: ${objetivo.etiqueta}")
         _estado.value = _estado.value.copy(objetivo = objetivo)
         cargarDatosDelDia()
+    }
+
+    // ─── Edición de cantidad de ingesta ──────────────────────────────────────────
+
+    /** Abre el diálogo de edición de gramos para una ingesta concreta del slot. */
+    fun abrirEdicionIngesta(slotNombre: String, receta: Receta) {
+        _estado.value = _estado.value.copy(
+            ingestaEditando = IngestaEditando(slotNombre = slotNombre, recetaOriginal = receta)
+        )
+    }
+
+    /** Actualiza el texto del campo de gramos mientras el usuario escribe. */
+    fun actualizarCantidadEdicion(texto: String) {
+        val edicion = _estado.value.ingestaEditando ?: return
+        _estado.value = _estado.value.copy(
+            ingestaEditando = edicion.copy(cantidadTexto = texto.filter { it.isDigit() || it == '.' })
+        )
+    }
+
+    /**
+     * Aplica la cantidad editada escalando los macros con regla de tres (base = 100 g).
+     * Reemplaza la receta original en el slot y persiste los nuevos totales en Supabase.
+     */
+    fun confirmarEdicionIngesta() {
+        val edicion = _estado.value.ingestaEditando ?: return
+        val cantidad = edicion.cantidadTexto.toFloatOrNull() ?: return
+        if (cantidad <= 0f) return
+
+        val factor = cantidad / 100f
+        val recetaEscalada = edicion.recetaOriginal.copy(
+            kcalTotales = (edicion.recetaOriginal.kcalTotales * factor).toInt(),
+            proteinasG = edicion.recetaOriginal.proteinasG * factor,
+            carbosG = edicion.recetaOriginal.carbosG * factor,
+            grasasG = edicion.recetaOriginal.grasasG * factor
+        )
+
+        val estadoActual = _estado.value
+        val mapaActualizado = estadoActual.ingestasDelDia.toMutableMap()
+        val lista = (mapaActualizado[edicion.slotNombre] ?: emptyList()).toMutableList()
+        val idx = lista.indexOf(edicion.recetaOriginal)
+        if (idx >= 0) lista[idx] = recetaEscalada
+        mapaActualizado[edicion.slotNombre] = lista
+
+        val nuevoKcal = (estadoActual.consumidoKcal - edicion.recetaOriginal.kcalTotales + recetaEscalada.kcalTotales).coerceAtLeast(0)
+        val nuevasProteinas = (estadoActual.consumidoProteinasG - edicion.recetaOriginal.proteinasG + recetaEscalada.proteinasG).coerceAtLeast(0f)
+        val nuevosCarbos = (estadoActual.consumidoCarbosG - edicion.recetaOriginal.carbosG + recetaEscalada.carbosG).coerceAtLeast(0f)
+        val nuevasGrasas = (estadoActual.consumidoGrasasG - edicion.recetaOriginal.grasasG + recetaEscalada.grasasG).coerceAtLeast(0f)
+
+        _estado.value = estadoActual.copy(
+            consumidoKcal = nuevoKcal,
+            consumidoProteinasG = nuevasProteinas,
+            consumidoCarbosG = nuevosCarbos,
+            consumidoGrasasG = nuevasGrasas,
+            ingestasDelDia = mapaActualizado,
+            ingestaEditando = null
+        )
+        Log.d("CalculadoraViewModel", "Ingesta '${edicion.recetaOriginal.titulo}' ajustada a ${cantidad}g → ${recetaEscalada.kcalTotales} kcal.")
+
+        viewModelScope.launch {
+            val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
+            macrosRepositorio.guardarMacrosDelDia(
+                MacrosDiarios(
+                    id = estadoActual.macrosDiariosId,
+                    userId = userId,
+                    fecha = estadoActual.fechaVisualizando,
+                    objetivoKcal = estadoActual.objetivoKcal,
+                    consumidoKcal = nuevoKcal,
+                    consumidoProteinasG = nuevasProteinas,
+                    consumidoCarbosG = nuevosCarbos,
+                    consumidoGrasasG = nuevasGrasas
+                )
+            ).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al persistir macros tras editar ingesta: ${e.message}")
+            }
+        }
+    }
+
+    /** Cancela la edición de ingesta sin aplicar cambios. */
+    fun cerrarEdicionIngesta() {
+        _estado.value = _estado.value.copy(ingestaEditando = null)
+    }
+
+    /** Cierra la sesión del usuario en Supabase y señaliza la navegación de vuelta al login. */
+    fun cerrarSesion() {
+        viewModelScope.launch {
+            try {
+                supabase.auth.signOut()
+                Log.d("CalculadoraViewModel", "Sesión cerrada correctamente.")
+            } catch (e: Exception) {
+                Log.e("CalculadoraViewModel", "Error al cerrar sesión: ${e.message}")
+            } finally {
+                _estado.value = _estado.value.copy(sesionCerrada = true)
+            }
+        }
     }
 
     /** Carga la biblioteca de recetas del usuario para mostrarlas en el picker. */
@@ -410,8 +511,17 @@ data class EstadoCalculadora(
     // Navegación de fechas (modo historial = solo lectura)
     val fechaVisualizando: String = java.time.LocalDate.now().toString(),
     val esModoHistorial: Boolean = false,
-    // Búsqueda de alimentos en OpenFoodFacts
+    // Búsqueda de alimentos: texto, resultados locales (inmediatos) y de API (con debounce)
     val busquedaTexto: String = "",
+    val resultadosLocales: List<Receta> = emptyList(),
     val resultadosBusqueda: List<Receta> = emptyList(),
-    val buscandoAlimento: Boolean = false
+    val buscandoAlimento: Boolean = false,
+    val sesionCerrada: Boolean = false,
+    val ingestaEditando: IngestaEditando? = null
+)
+
+data class IngestaEditando(
+    val slotNombre: String,
+    val recetaOriginal: Receta,
+    val cantidadTexto: String = "100"
 )

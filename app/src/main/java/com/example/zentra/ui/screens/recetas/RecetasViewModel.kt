@@ -88,8 +88,48 @@ class RecetasViewModel @Inject constructor(
         _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(titulo = valor, error = null))
     }
 
-    fun actualizarIngredientes(valor: String) {
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = valor))
+    fun agregarIngrediente() {
+        val lista = _estado.value.formulario.ingredientes + IngredienteFormulario()
+        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
+    }
+
+    fun eliminarIngrediente(idx: Int) {
+        val lista = _estado.value.formulario.ingredientes.toMutableList()
+        if (lista.size > 1) lista.removeAt(idx)
+        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
+    }
+
+    fun actualizarUnidades(idx: Int, valor: String) {
+        val lista = _estado.value.formulario.ingredientes.toMutableList()
+        lista[idx] = lista[idx].copy(unidades = valor)
+        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
+    }
+
+    fun actualizarAlimento(idx: Int, valor: String) {
+        val lista = _estado.value.formulario.ingredientes.toMutableList()
+        lista[idx] = lista[idx].copy(alimento = valor)
+        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
+    }
+
+    fun actualizarPesoG(idx: Int, valor: String) {
+        val lista = _estado.value.formulario.ingredientes.toMutableList()
+        lista[idx] = lista[idx].copy(pesoG = valor)
+        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
+    }
+
+    fun usarAlimentoGuardado(alimento: AlimentoGuardado) {
+        val lista = _estado.value.formulario.ingredientes.toMutableList()
+        val idx = lista.indexOfFirst { it.alimento.isBlank() }
+        if (idx >= 0) {
+            lista[idx] = lista[idx].copy(
+                alimento = alimento.nombre,
+                unidades = alimento.unidades.ifEmpty { lista[idx].unidades },
+                pesoG = alimento.pesoG.ifEmpty { lista[idx].pesoG }
+            )
+        } else {
+            lista.add(IngredienteFormulario(alimento = alimento.nombre, unidades = alimento.unidades, pesoG = alimento.pesoG))
+        }
+        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
     }
 
     fun actualizarProteinas(valor: String) {
@@ -138,6 +178,16 @@ class RecetasViewModel @Inject constructor(
 
                 val kcalCalculadas = ((proteinas * 4f) + (carbos * 4f) + (grasas * 9f)).toInt()
 
+                val ingredientesTexto = form.ingredientes
+                    .filter { it.alimento.isNotBlank() }
+                    .joinToString("\n") { ing ->
+                        buildString {
+                            if (ing.unidades.isNotBlank()) append("${ing.unidades} ")
+                            append(ing.alimento.trim())
+                            if (ing.pesoG.isNotBlank()) append(" (${ing.pesoG}g)")
+                        }
+                    }
+
                 val nuevaReceta = Receta(
                     id = UUID.randomUUID().toString(),
                     userId = userId,
@@ -146,7 +196,7 @@ class RecetasViewModel @Inject constructor(
                     proteinasG = proteinas,
                     carbosG = carbos,
                     grasasG = grasas,
-                    ingredientes = form.ingredientes.trim(),
+                    ingredientes = ingredientesTexto,
                     fijada = false,
                     creadaEn = null
                 )
@@ -223,15 +273,31 @@ data class EstadoRecetas(
 )
 
 /**
+ * Un ingrediente con sus tres campos: cantidad, nombre y peso en gramos.
+ * Todos como String para permitir entrada parcial libre.
+ */
+data class IngredienteFormulario(
+    val unidades: String = "",
+    val alimento: String = "",
+    val pesoG: String = ""
+)
+
+/**
  * Estado del formulario de creación manual de recetas.
- * Todos los campos numéricos se almacenan como String para permitir entrada parcial sin errores de parseo.
+ * Los ingredientes son una lista de filas estructuradas (unidades/alimento/peso).
  */
 data class FormularioNuevaReceta(
     val titulo: String = "",
-    val ingredientes: String = "",
+    val ingredientes: List<IngredienteFormulario> = listOf(IngredienteFormulario()),
     val proteinas: String = "",
     val carbos: String = "",
     val grasas: String = "",
     val guardando: Boolean = false,
     val error: String? = null
+)
+
+data class AlimentoGuardado(
+    val nombre: String,
+    val unidades: String = "",
+    val pesoG: String = ""
 )
