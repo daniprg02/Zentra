@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.LocalCafe
@@ -141,7 +142,8 @@ fun PantallaCalculadora(
             onCambiarFecha = viewModel::cambiarFecha,
             onVolverAHoy = viewModel::volverAHoy,
             onLogout = viewModel::cerrarSesion,
-            onEditarIngesta = viewModel::abrirEdicionIngesta
+            onEditarIngesta = viewModel::abrirEdicionIngesta,
+            onPedirReinicio = viewModel::pedirReinicio
         )
     }
 
@@ -177,6 +179,23 @@ fun PantallaCalculadora(
                 onCerrar = viewModel::cerrarSlot
             )
         }
+    }
+
+    // Diálogo de confirmación para reiniciar todas las ingestas del día
+    if (estado.mostrandoDialogoReinicio) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelarReinicio,
+            title = { Text("¿Reiniciar las ingestas del día?") },
+            text = { Text("Se eliminarán todos los alimentos registrados hoy. Esta acción no se puede deshacer.") },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmarReinicio) {
+                    Text("Sí, reiniciar", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelarReinicio) { Text("Cancelar") }
+            }
+        )
     }
 
     // Diálogo de edición de cantidad (gramos) de una ingesta ya añadida
@@ -245,7 +264,8 @@ private fun ContenidoCalculadora(
     onCambiarFecha: (LocalDate) -> Unit,
     onVolverAHoy: () -> Unit,
     onLogout: () -> Unit,
-    onEditarIngesta: (String, Receta) -> Unit
+    onEditarIngesta: (String, Receta) -> Unit,
+    onPedirReinicio: () -> Unit
 ) {
     var mostrarDatePicker by remember { mutableStateOf(false) }
 
@@ -401,15 +421,40 @@ private fun ContenidoCalculadora(
             }
 
             item {
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    AnilloCaloricoProgress(
-                        consumidoKcal = estado.consumidoKcal,
-                        objetivoKcal = estado.objetivoKcal,
-                        colorPrimario = colorSecundario,
-                        colorAdvertencia = colorTerciario,
-                        colorError = colorError,
-                        colorPista = colorSuperficieVariante
-                    )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        AnilloCaloricoProgress(
+                            consumidoKcal = estado.consumidoKcal,
+                            objetivoKcal = estado.objetivoKcal,
+                            colorPrimario = colorSecundario,
+                            colorAdvertencia = colorTerciario,
+                            colorError = colorError,
+                            colorPista = colorSuperficieVariante
+                        )
+                    }
+                    // Botón de reinicio visible únicamente cuando hay ingestas registradas
+                    if (!estado.esModoHistorial && estado.consumidoKcal > 0) {
+                        TextButton(
+                            onClick = onPedirReinicio,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Reiniciar ingestas",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
 
@@ -975,6 +1020,9 @@ private fun TarjetaMacros(
 
 @Composable
 private fun BarraMacro(etiqueta: String, consumidoG: Float, objetivoG: Float, color: Color) {
+    val excedido = consumidoG > objetivoG
+    // Cuando se supera el objetivo, la barra cambia a rojo pastel para alertar visualmente
+    val colorFinal = if (excedido) MaterialTheme.colorScheme.error else color
     val progreso = if (objetivoG > 0f) (consumidoG / objetivoG).coerceIn(0f, 1f) else 0f
     val progresoAnimado by animateFloatAsState(
         targetValue = progreso,
@@ -992,7 +1040,7 @@ private fun BarraMacro(etiqueta: String, consumidoG: Float, objetivoG: Float, co
                 "${"%.0f".format(consumidoG)} / ${"%.0f".format(objetivoG)}g",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground
+                color = if (excedido) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground
             )
         }
         Spacer(modifier = Modifier.height(6.dp))
@@ -1002,7 +1050,7 @@ private fun BarraMacro(etiqueta: String, consumidoG: Float, objetivoG: Float, co
                 .fillMaxWidth()
                 .height(8.dp)
                 .clip(RoundedCornerShape(4.dp)),
-            color = color,
+            color = colorFinal,
             trackColor = MaterialTheme.colorScheme.surface
         )
     }

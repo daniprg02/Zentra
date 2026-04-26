@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -774,7 +775,11 @@ private fun DialogoEditarEjercicio(
 
                 Text("Series:", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // horizontalScroll evita que los chips se corten en pantallas estrechas
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     (1..6).forEach { n ->
                         FilterChip(
                             selected = seriesLocal == n,
@@ -883,7 +888,6 @@ private fun TarjetaDia(
                         ItemEjercicio(
                             ejercicio = ej,
                             ejercicioIdx = idx,
-                            colorAccento = colorAccento,
                             esSustituyendo = esSustituyendo,
                             onEditar = { onIniciarEdicion(idx) },
                             onSustituir = { onSustituirConIA(idx) }
@@ -900,16 +904,19 @@ private fun TarjetaDia(
 private fun ItemEjercicio(
     ejercicio: EjercicioEnRutina,
     ejercicioIdx: Int,
-    colorAccento: Color,
     esSustituyendo: Boolean,
     onEditar: () -> Unit,
     onSustituir: () -> Unit
 ) {
+    // Color identificativo del grupo muscular; si no está mapeado, se usa el color primario del tema
+    val colorMusculo = COLORES_MUSCULARES[ejercicio.grupoMuscular]
+        ?: MaterialTheme.colorScheme.primary
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(colorAccento))
+        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(colorMusculo))
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(ejercicio.nombre, style = MaterialTheme.typography.bodyMedium)
@@ -917,13 +924,13 @@ private fun ItemEjercicio(
         }
         if (esSustituyendo) {
             // Spinner mientras la IA genera el sustituto
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colorAccento)
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colorMusculo)
         } else {
             Text(
                 "${ejercicio.series} × ${ejercicio.repeticiones}",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = colorAccento
+                color = colorMusculo
             )
             Spacer(modifier = Modifier.width(4.dp))
             // Editar series/repeticiones

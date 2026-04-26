@@ -418,6 +418,53 @@ class CalculadoraViewModel @Inject constructor(
         _estado.value = _estado.value.copy(ingestaEditando = null)
     }
 
+    /** Muestra el diálogo de confirmación para reiniciar todas las ingestas del día. */
+    fun pedirReinicio() {
+        if (_estado.value.esModoHistorial) return
+        _estado.value = _estado.value.copy(mostrandoDialogoReinicio = true)
+    }
+
+    /** Descarta el diálogo de reinicio sin aplicar cambios. */
+    fun cancelarReinicio() {
+        _estado.value = _estado.value.copy(mostrandoDialogoReinicio = false)
+    }
+
+    /**
+     * Pone a cero los totales del día y borra todos los slots.
+     * Persiste el estado vacío en Supabase para que el historial refleje el reinicio.
+     */
+    fun confirmarReinicio() {
+        viewModelScope.launch {
+            val estadoActual = _estado.value
+            val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
+
+            _estado.value = estadoActual.copy(
+                consumidoKcal = 0,
+                consumidoProteinasG = 0f,
+                consumidoCarbosG = 0f,
+                consumidoGrasasG = 0f,
+                ingestasDelDia = emptyMap(),
+                mostrandoDialogoReinicio = false
+            )
+            Log.d("CalculadoraViewModel", "Ingestas del día reiniciadas a cero.")
+
+            macrosRepositorio.guardarMacrosDelDia(
+                MacrosDiarios(
+                    id = estadoActual.macrosDiariosId,
+                    userId = userId,
+                    fecha = estadoActual.fechaVisualizando,
+                    objetivoKcal = estadoActual.objetivoKcal,
+                    consumidoKcal = 0,
+                    consumidoProteinasG = 0f,
+                    consumidoCarbosG = 0f,
+                    consumidoGrasasG = 0f
+                )
+            ).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al guardar el reinicio de macros: ${e.message}")
+            }
+        }
+    }
+
     /** Cierra la sesión del usuario en Supabase y señaliza la navegación de vuelta al login. */
     fun cerrarSesion() {
         viewModelScope.launch {
@@ -539,7 +586,8 @@ data class EstadoCalculadora(
     val resultadosBusqueda: List<Receta> = emptyList(),
     val buscandoAlimento: Boolean = false,
     val sesionCerrada: Boolean = false,
-    val ingestaEditando: IngestaEditando? = null
+    val ingestaEditando: IngestaEditando? = null,
+    val mostrandoDialogoReinicio: Boolean = false
 )
 
 data class IngestaEditando(
