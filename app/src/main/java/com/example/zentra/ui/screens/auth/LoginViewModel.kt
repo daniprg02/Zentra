@@ -1,10 +1,12 @@
 package com.example.zentra.ui.screens.auth
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.zentra.domain.repository.IPerfilRepositorio
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
@@ -22,8 +24,15 @@ import javax.inject.Inject
 @HiltViewModel
 class LoginViewModel @Inject constructor(
     private val supabase: SupabaseClient,
-    private val perfilRepositorio: IPerfilRepositorio
+    private val perfilRepositorio: IPerfilRepositorio,
+    @ApplicationContext context: Context
 ) : ViewModel() {
+
+    private val prefs = context.getSharedPreferences("zentra_credenciales", Context.MODE_PRIVATE)
+
+    val emailGuardado: String get() = prefs.getString("email", "") ?: ""
+    val contrasenaGuardada: String get() = prefs.getString("contrasena", "") ?: ""
+    val recordarGuardado: Boolean get() = prefs.getBoolean("recordar", false)
 
     private val _estado = MutableStateFlow<EstadoLogin>(EstadoLogin.Inactivo)
     val estado: StateFlow<EstadoLogin> = _estado.asStateFlow()
@@ -44,7 +53,7 @@ class LoginViewModel @Inject constructor(
      * @param email Correo electrónico del usuario.
      * @param contrasena Contraseña del usuario.
      */
-    fun iniciarSesion(email: String, contrasena: String) {
+    fun iniciarSesion(email: String, contrasena: String, recordar: Boolean = false) {
         if (!validarCampos(email, contrasena)) return
         viewModelScope.launch {
             _estado.value = EstadoLogin.Cargando
@@ -57,13 +66,25 @@ class LoginViewModel @Inject constructor(
                     ?: throw Exception("No se pudo recuperar el ID del usuario tras el login")
                 Log.d("LoginViewModel", "Login correcto para el usuario: $userId")
 
-                // Comprobamos si el perfil ya existe para decidir el destino de navegación
+                if (recordar) {
+                    prefs.edit().putString("email", email.trim()).putString("contrasena", contrasena).putBoolean("recordar", true).apply()
+                } else {
+                    prefs.edit().remove("email").remove("contrasena").putBoolean("recordar", false).apply()
+                }
+
                 val tienePerfil = perfilRepositorio.obtenerPerfil(userId).isSuccess
                 _estado.value = if (tienePerfil) EstadoLogin.ExitosoConPerfil else EstadoLogin.ExitosoSinPerfil
             } catch (e: Exception) {
                 Log.e("LoginViewModel", "Error al iniciar sesión: ${e.message}")
                 _estado.value = EstadoLogin.Error(traducirError(e))
             }
+        }
+    }
+
+    /** Limpia cualquier mensaje de error o confirmación cuando el usuario empieza a escribir. */
+    fun limpiarMensaje() {
+        if (_estado.value is EstadoLogin.Error || _estado.value is EstadoLogin.ResetEnviado) {
+            _estado.value = EstadoLogin.Inactivo
         }
     }
 
@@ -130,6 +151,28 @@ class LoginViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Envía un email de recuperación de contraseña a la dirección indicada.
+     * Muestra un error si el campo está vacío; de lo contrario, transiciona a ResetEnviado.
+     */
+    fun resetContrasena(email: String) {
+        if (email.isBlank()) {
+            _estado.value = EstadoLogin.Error("Introduce tu email para recuperar la contraseña.")
+            return
+        }
+        viewModelScope.launch {
+            _estado.value = EstadoLogin.Cargando
+            try {
+                supabase.auth.resetPasswordForEmail(email.trim())
+                Log.d("LoginViewModel", "Email de recuperación enviado a: ${email.trim()}")
+                _estado.value = EstadoLogin.ResetEnviado
+            } catch (e: Exception) {
+                Log.e("LoginViewModel", "Error al enviar reset de contraseña: ${e.message}")
+                _estado.value = EstadoLogin.Error("No se pudo enviar el correo. Inténtalo de nuevo.")
+            }
+        }
+    }
+
     /** Convierte las excepciones de Supabase en mensajes comprensibles para el usuario. */
     private fun traducirError(e: Exception): String = when {
         e.message?.contains("Invalid login credentials") == true -> "Email o contraseña incorrectos."
@@ -149,6 +192,8 @@ class LoginViewModel @Inject constructor(
         data object ExitosoConPerfil : EstadoLogin()
         /** Login/registro correcto pero el usuario aún no ha completado el Onboarding. */
         data object ExitosoSinPerfil : EstadoLogin()
+        /** Email de recuperación de contraseña enviado correctamente. */
+        data object ResetEnviado : EstadoLogin()
         data class Error(val mensaje: String) : EstadoLogin()
     }
 }

@@ -259,9 +259,9 @@ private fun PantallaCuestionario(
     onAtras: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        LinearProgressIndicator(progress = { paso / 3f }, modifier = Modifier.fillMaxWidth())
+        LinearProgressIndicator(progress = { paso / 4f }, modifier = Modifier.fillMaxWidth())
         Text(
-            "Paso $paso de 3",
+            "Paso $paso de 4",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
@@ -277,6 +277,7 @@ private fun PantallaCuestionario(
                 1 -> PasoDiasYObjetivo(datos = datos, onActualizar = onActualizar)
                 2 -> PasoMusculosPrioritarios(datos = datos, sexo = sexo, onActualizar = onActualizar)
                 3 -> PasoExperienciaYLugar(datos = datos, onActualizar = onActualizar)
+                4 -> PasoLesiones(datos = datos, onActualizar = onActualizar)
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -288,7 +289,7 @@ private fun PantallaCuestionario(
                 Text(if (paso == 1) "Cancelar" else "Atrás")
             }
             Button(onClick = onSiguiente, modifier = Modifier.weight(1f)) {
-                Text(if (paso == 3) "Generar rutina" else "Siguiente")
+                Text(if (paso == 4) "Generar rutina" else "Siguiente")
             }
         }
     }
@@ -508,6 +509,35 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun PasoLesiones(datos: DatosCuestionario, onActualizar: (DatosCuestionario) -> Unit) {
+    Column {
+        Text(
+            "¿Tienes alguna lesión o limitación física?",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "Gemini la tendrá en cuenta para evitar sobrecargar la zona afectada. Si no tienes ninguna, puedes dejarlo vacío.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        OutlinedTextField(
+            value = datos.lesiones,
+            onValueChange = { onActualizar(datos.copy(lesiones = it)) },
+            label = { Text("Lesiones o limitaciones (opcional)") },
+            placeholder = { Text("Ej: tendinitis en el hombro derecho, dolor lumbar crónico, rodilla operada...") },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            minLines = 3,
+            maxLines = 6,
+            shape = RoundedCornerShape(12.dp)
+        )
     }
 }
 

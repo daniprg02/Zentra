@@ -18,8 +18,8 @@ object ConstantesRed {
     // TODO: Introduce tu clave pública (anon) de Supabase
     const val SUPABASE_ANON_KEY = "sb_publishable_A7ltf_8aBVpPfzGO_M5Mtg_sLiYn8LA"
 
-    // OpenFoodFacts es una API pública y gratuita, no requiere autenticación
-    const val API_NUTRICIONAL_BASE_URL = "https://world.openfoodfacts.org/"
+    // OpenFoodFacts España — resultados en español (menos productos, pero todos en castellano)
+    const val API_NUTRICIONAL_BASE_URL = "https://es.openfoodfacts.org/"
 
     // Gemini REST API — la clave se inyecta desde BuildConfig (local.properties)
     const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"

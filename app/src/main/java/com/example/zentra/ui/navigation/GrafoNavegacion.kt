@@ -105,7 +105,15 @@ fun GrafoNavegacion() {
 
             // Menú principal: tres módulos con barra de navegación inferior
             composable(Destinos.Rutinas.ruta) { PantallaRutinas() }
-            composable(Destinos.Calculadora.ruta) { PantallaCalculadora() }
+            composable(Destinos.Calculadora.ruta) {
+                PantallaCalculadora(
+                    onLogout = {
+                        navController.navigate(Destinos.Login.ruta) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                )
+            }
             composable(Destinos.Recetas.ruta) { PantallaRecetas() }
         }
     }

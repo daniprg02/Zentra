@@ -25,6 +25,8 @@ data class ProductoAlimentoDto(
      */
     fun aReceta(): Receta? {
         val titulo = nombre?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        // Descarta productos cuyos nombres contienen alfabetos no latinos (cirílico, árabe, chino, etc.)
+        if (titulo.any { it.code > 0x024F && it !in "àáâãäåæçèéêëìíîïðñòóôõöùúûüýþÿÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖÙÚÛÜÝÞŸ" }) return null
         val nut = nutriments ?: return null
 
         val kcal = (nut.kcalRacion ?: nut.kcal100g)?.toFloat() ?: return null

@@ -1,8 +1,10 @@
 package com.example.zentra.ui.screens.auth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,9 +71,10 @@ fun PantallaLogin(
     val modo by viewModel.modo.collectAsState()
     val focusManager = LocalFocusManager.current
 
-    var email by rememberSaveable { mutableStateOf("") }
-    var contrasena by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf(viewModel.emailGuardado) }
+    var contrasena by rememberSaveable { mutableStateOf(viewModel.contrasenaGuardada) }
     var contrasenaVisible by remember { mutableStateOf(false) }
+    var recordar by rememberSaveable { mutableStateOf(viewModel.recordarGuardado) }
 
     // Navegamos al destino correcto cuando la autenticación es exitosa
     LaunchedEffect(estado) {
@@ -112,7 +116,7 @@ fun PantallaLogin(
         // Campo: Email
         OutlinedTextField(
             value = email,
-            onValueChange = { email = it },
+            onValueChange = { email = it; viewModel.limpiarMensaje() },
             label = { Text("Email") },
             leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
             singleLine = true,
@@ -133,7 +137,7 @@ fun PantallaLogin(
         // Campo: Contraseña
         OutlinedTextField(
             value = contrasena,
-            onValueChange = { contrasena = it },
+            onValueChange = { contrasena = it; viewModel.limpiarMensaje() },
             label = { Text("Contraseña") },
             leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
             trailingIcon = {
@@ -155,20 +159,56 @@ fun PantallaLogin(
             keyboardActions = KeyboardActions(
                 onDone = {
                     focusManager.clearFocus()
-                    if (modo == ModoLogin.INICIAR_SESION) viewModel.iniciarSesion(email, contrasena)
+                    if (modo == ModoLogin.INICIAR_SESION) viewModel.iniciarSesion(email, contrasena, recordar)
                     else viewModel.registrarse(email, contrasena)
                 }
             ),
             enabled = estado !is EstadoLogin.Cargando
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Opciones solo visibles en modo login
+        if (modo == ModoLogin.INICIAR_SESION) {
+            TextButton(
+                onClick = { viewModel.resetContrasena(email) },
+                modifier = Modifier.align(Alignment.End),
+                enabled = estado !is EstadoLogin.Cargando
+            ) {
+                Text(
+                    text = "¿Olvidaste tu contraseña?",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = estado !is EstadoLogin.Cargando) { recordar = !recordar },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = recordar,
+                    onCheckedChange = { recordar = it },
+                    enabled = estado !is EstadoLogin.Cargando
+                )
+                Text(
+                    text = "Recordar usuario y contraseña",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.height(18.dp))
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Botón principal de acción
         Button(
             onClick = {
                 focusManager.clearFocus()
-                if (modo == ModoLogin.INICIAR_SESION) viewModel.iniciarSesion(email, contrasena)
+                if (modo == ModoLogin.INICIAR_SESION) viewModel.iniciarSesion(email, contrasena, recordar)
                 else viewModel.registrarse(email, contrasena)
             },
             modifier = Modifier
@@ -190,15 +230,27 @@ fun PantallaLogin(
             }
         }
 
-        // Mensaje de error
-        if (estado is EstadoLogin.Error) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = (estado as EstadoLogin.Error).mensaje,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center
-            )
+        // Mensaje de error o confirmación de reset
+        when (estado) {
+            is EstadoLogin.Error -> {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = (estado as EstadoLogin.Error).mensaje,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+            }
+            is EstadoLogin.ResetEnviado -> {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Te hemos enviado un email con instrucciones para restablecer tu contraseña.",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+            }
+            else -> {}
         }
 
         Spacer(modifier = Modifier.height(24.dp))

@@ -21,7 +21,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,7 +45,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.zentra.ui.screens.auth.OnboardingViewModel.EstadoOnboarding
-import com.example.zentra.ui.screens.auth.OnboardingViewModel.TOTAL_PASOS
 
 /**
  * Wizard de Onboarding de Zentra.
@@ -68,6 +66,7 @@ fun PantallaOnboarding(
     val paso by viewModel.pasoActual.collectAsState()
     val formulario by viewModel.formulario.collectAsState()
     val estado by viewModel.estado.collectAsState()
+    val totalPasos = OnboardingViewModel.TOTAL_PASOS
 
     LaunchedEffect(estado) {
         if (estado is EstadoOnboarding.Exitoso) onPerfilGuardado()
@@ -76,7 +75,7 @@ fun PantallaOnboarding(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Paso ${paso + 1} de $TOTAL_PASOS") },
+                title = { Text("Paso ${paso + 1} de $totalPasos") },
                 navigationIcon = {
                     if (paso > 0) {
                         IconButton(onClick = { viewModel.retrocederPaso() }) {
@@ -98,7 +97,7 @@ fun PantallaOnboarding(
         ) {
             // Barra de progreso del wizard
             LinearProgressIndicator(
-                progress = { (paso + 1).toFloat() / TOTAL_PASOS },
+                progress = { (paso + 1).toFloat() / totalPasos },
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.primary
             )
@@ -163,7 +162,7 @@ fun PantallaOnboarding(
             // Botón de acción: Siguiente o Finalizar
             Button(
                 onClick = {
-                    if (paso < TOTAL_PASOS - 1) viewModel.avanzarPaso()
+                    if (paso < totalPasos - 1) viewModel.avanzarPaso()
                     else viewModel.guardarPerfil()
                 },
                 modifier = Modifier
@@ -175,11 +174,12 @@ fun PantallaOnboarding(
                 if (estado is EstadoOnboarding.Cargando) {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.align(Alignment.CenterVertically)
                     )
                 } else {
                     Text(
-                        text = if (paso < TOTAL_PASOS - 1) "Siguiente" else "Empezar",
+                        text = if (paso < totalPasos - 1) "Siguiente" else "Empezar",
                         style = MaterialTheme.typography.labelLarge
                     )
                 }

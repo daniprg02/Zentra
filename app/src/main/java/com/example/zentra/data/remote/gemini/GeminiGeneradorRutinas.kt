@@ -183,6 +183,7 @@ $catalogoStr
     private fun construirPrompt(datos: DatosCuestionario, ejercicios: List<Ejercicio>): String {
         val musculosPrioritariosStr = datos.musculosPrioritarios
             .takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Ninguno"
+        val lesionesStr = datos.lesiones.trim().takeIf { it.isNotBlank() } ?: "Ninguna"
         val (series, reps) = when (datos.objetivo) {
             "Déficit" -> "3" to "12-15"
             "Superávit" -> "4" to "6-10"
@@ -226,6 +227,7 @@ PERFIL:
 - Experiencia: ${datos.experiencia}
 - Lugar de entrenamiento: $lugarDescripcion$materialExtra
 - Músculos prioritarios: $musculosPrioritariosStr
+- Lesiones o limitaciones físicas: $lesionesStr
 
 REGLAS DE GENERACIÓN:
 1. Crea EXACTAMENTE ${datos.diasSemana} días.
@@ -235,6 +237,7 @@ REGLAS DE GENERACIÓN:
 5. Usa ÚNICAMENTE ejercicios del catálogo (copia el id exactamente, sin modificarlo).
 6. Aplica el split más adecuado para ${datos.diasSemana} días (Full Body, Push/Pull/Legs, Upper/Lower, etc.).
 7. Si el lugar es casa o calle con material específico, prioriza ejercicios compatibles con ese material.
+8. Si hay lesiones, evita o minimiza ejercicios que carguen directamente la zona afectada. Si no hay alternativa, reduce la intensidad (series/repeticiones bajas).
 
 CATÁLOGO DE EJERCICIOS DISPONIBLES:
 $catalogoStr

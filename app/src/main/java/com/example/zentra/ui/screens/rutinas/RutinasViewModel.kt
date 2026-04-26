@@ -97,7 +97,7 @@ class RutinasViewModel @Inject constructor(
 
     fun siguientePaso() {
         val actual = _estado.value as? EstadoRutinas.EnCuestionario ?: return
-        if (actual.paso < 3) {
+        if (actual.paso < 4) {
             _estado.value = actual.copy(paso = actual.paso + 1)
         } else {
             generarYGuardarRutina(actual.datos)
@@ -547,10 +547,9 @@ data class DatosCuestionario(
     val diasSemana: Int = 3,
     val musculosPrioritarios: Set<String> = emptySet(),
     val experiencia: String = "Nunca he entrenado",
-    // Lugar principal seleccionado (Casa, Calle, Gimnasio grande, Mixto, etc.)
     val lugarEntrenamiento: String = "Gimnasio grande",
-    // Descripción libre del material disponible, usada cuando el lugar es Casa o Calle
     val materialDisponible: String = "",
-    // Lista ordenada de hasta 2 lugares cuando se elige Mixto; el índice marca la prioridad
-    val lugaresSeleccionados: List<String> = emptyList()
+    val lugaresSeleccionados: List<String> = emptyList(),
+    // Lesiones o limitaciones físicas descritas libremente por el usuario
+    val lesiones: String = ""
 )
