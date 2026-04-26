@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.UUID
@@ -53,6 +54,7 @@ class CalculadoraViewModel @Inject constructor(
     init {
         Log.d("CalculadoraViewModel", "ViewModel inicializado. Cargando datos nutricionales del día.")
         cargarDatosDelDia()
+        observarCambiosEnRecetas()
     }
 
     /**
@@ -426,6 +428,26 @@ class CalculadoraViewModel @Inject constructor(
                 Log.e("CalculadoraViewModel", "Error al cerrar sesión: ${e.message}")
             } finally {
                 _estado.value = _estado.value.copy(sesionCerrada = true)
+            }
+        }
+    }
+
+    /**
+     * Escucha el flujo de notificaciones del repositorio de recetas.
+     * Cuando se guarda o elimina una receta desde la pestaña Recetas, este método reacciona:
+     * - Si el picker está abierto: recarga la lista inmediatamente.
+     * - Si el picker está cerrado: vacía el caché para que la próxima apertura cargue datos frescos.
+     */
+    private fun observarCambiosEnRecetas() {
+        viewModelScope.launch {
+            recetasRepositorio.notificaciones.collect {
+                if (_estado.value.slotActivo != null) {
+                    Log.d("CalculadoraViewModel", "Recetas modificadas mientras el picker estaba abierto. Recargando.")
+                    cargarRecetasParaPicker()
+                } else {
+                    Log.d("CalculadoraViewModel", "Recetas modificadas. Caché de picker invalidado.")
+                    _estado.value = _estado.value.copy(recetasDisponibles = emptyList())
+                }
             }
         }
     }

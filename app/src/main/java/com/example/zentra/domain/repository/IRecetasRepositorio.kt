@@ -1,6 +1,7 @@
 package com.example.zentra.domain.repository
 
 import com.example.zentra.domain.model.Receta
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Contrato del repositorio de recetas.
@@ -8,6 +9,12 @@ import com.example.zentra.domain.model.Receta
  * como del catálogo predefinido de la base de datos.
  */
 interface IRecetasRepositorio {
+
+    /**
+     * Flujo que emite una señal cada vez que se guarda o elimina una receta.
+     * Permite a otros módulos (p. ej. Calculadora) reaccionar a los cambios sin acoplamiento directo.
+     */
+    val notificaciones: Flow<Unit>
 
     /**
      * Obtiene todas las recetas del usuario.
