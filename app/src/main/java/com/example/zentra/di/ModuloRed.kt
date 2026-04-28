@@ -1,10 +1,13 @@
 package com.example.zentra.di
 
+import android.content.Context
+import com.example.zentra.data.local.ZentraSessionManager
 import com.example.zentra.data.remote.ConstantesRed
 import com.example.zentra.data.remote.api.OpenFoodFactsService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
@@ -34,14 +37,19 @@ object ModuloRed {
      */
     @Provides
     @Singleton
-    fun provideSupabaseClient(): SupabaseClient = createSupabaseClient(
-        supabaseUrl = ConstantesRed.SUPABASE_URL,
-        supabaseKey = ConstantesRed.SUPABASE_ANON_KEY
-    ) {
-        install(Auth)
-        install(Postgrest)
-        install(Storage)
-    }
+    fun provideSupabaseClient(@ApplicationContext context: Context): SupabaseClient =
+        createSupabaseClient(
+            supabaseUrl = ConstantesRed.SUPABASE_URL,
+            supabaseKey = ConstantesRed.SUPABASE_ANON_KEY
+        ) {
+            // ZentraSessionManager persiste el token en SharedPreferences para que la sesión
+            // sobreviva al cierre de la app. Sin esto, Auth usa MemorySessionManager (en RAM).
+            install(Auth) {
+                sessionManager = ZentraSessionManager(context)
+            }
+            install(Postgrest)
+            install(Storage)
+        }
 
     /**
      * Proporciona el cliente OkHttp con un interceptor de logs activo solo en debug.

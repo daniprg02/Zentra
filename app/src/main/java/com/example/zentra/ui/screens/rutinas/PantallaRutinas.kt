@@ -126,7 +126,8 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             todasLasRutinas = s.todasLasRutinas,
             rutinaParaEliminar = s.rutinaParaEliminar,
             sinConexion = s.sinConexion,
-            onIniciarCuestionario = viewModel::iniciarCuestionario,
+            onIniciarCuestionarioIA = viewModel::iniciarCuestionario,
+            onIniciarCuestionarioLocal = viewModel::iniciarCuestionarioLocal,
             onActivarRutina = viewModel::activarRutina,
             onPedirEliminar = viewModel::pedirEliminarRutina,
             onCancelarEliminar = viewModel::cancelarEliminarRutina,
@@ -154,6 +155,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             ejercicioEditando = s.ejercicioEditando,
             sustitucionEnCurso = s.sustitucionEnCurso,
             sinConexion = s.sinConexion,
+            esRutinaBasica = s.esRutinaBasica,
             onPedirNuevaRutina = viewModel::pedirNuevaRutina,
             onCancelarNuevaRutina = viewModel::cancelarNuevaRutina,
             onConfirmarNuevaRutina = viewModel::confirmarNuevaRutina,
@@ -184,7 +186,8 @@ private fun PantallaSinRutina(
     todasLasRutinas: List<RutinaUsuario>,
     rutinaParaEliminar: RutinaUsuario?,
     sinConexion: Boolean,
-    onIniciarCuestionario: () -> Unit,
+    onIniciarCuestionarioIA: () -> Unit,
+    onIniciarCuestionarioLocal: () -> Unit,
     onActivarRutina: (RutinaUsuario) -> Unit,
     onPedirEliminar: (RutinaUsuario) -> Unit,
     onCancelarEliminar: () -> Unit,
@@ -232,10 +235,24 @@ private fun PantallaSinRutina(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(24.dp))
-                    Button(onClick = onIniciarCuestionario, modifier = Modifier.fillMaxWidth()) {
+                    // Botón principal: rutina con IA
+                    Button(
+                        onClick = onIniciarCuestionarioIA,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Generar mi rutina")
+                        Text("Generar con IA")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Botón secundario: rutina básica sin red
+                    OutlinedButton(
+                        onClick = onIniciarCuestionarioLocal,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Outlined.FitnessCenter, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Crear rutina básica (sin internet)")
                     }
                 }
             }
@@ -275,10 +292,11 @@ private fun PantallaCuestionario(
     onSiguiente: () -> Unit,
     onAtras: () -> Unit
 ) {
+    val maxPasos = if (datos.generarConIA) 4 else 3
     Column(modifier = Modifier.fillMaxSize()) {
-        LinearProgressIndicator(progress = { paso / 4f }, modifier = Modifier.fillMaxWidth())
+        LinearProgressIndicator(progress = { paso / maxPasos.toFloat() }, modifier = Modifier.fillMaxWidth())
         Text(
-            "Paso $paso de 4",
+            "Paso $paso de $maxPasos${if (!datos.generarConIA) " · Rutina básica" else ""}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
@@ -306,7 +324,7 @@ private fun PantallaCuestionario(
                 Text(if (paso == 1) "Cancelar" else "Atrás")
             }
             Button(onClick = onSiguiente, modifier = Modifier.weight(1f)) {
-                Text(if (paso == 4) "Generar rutina" else "Siguiente")
+                Text(if (paso == maxPasos) "Generar rutina" else "Siguiente")
             }
         }
     }
@@ -643,6 +661,7 @@ private fun PantallaRutinaActiva(
     ejercicioEditando: EjercicioEditando?,
     sustitucionEnCurso: Pair<Int, Int>?,
     sinConexion: Boolean,
+    esRutinaBasica: Boolean,
     onPedirNuevaRutina: () -> Unit,
     onCancelarNuevaRutina: () -> Unit,
     onConfirmarNuevaRutina: () -> Unit,
@@ -742,6 +761,10 @@ private fun PantallaRutinaActiva(
                 item { BannerSinConexion() }
             }
 
+            if (esRutinaBasica) {
+                item { BannerRutinaBasica() }
+            }
+
             item { CabeceraPlan(cabecera = cabecera) }
 
             item {
@@ -822,6 +845,41 @@ private fun BannerSinConexion() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
+        }
+    }
+}
+
+@Composable
+private fun BannerRutinaBasica() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                Icons.Outlined.FitnessCenter,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp).padding(top = 2.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Column {
+                Text(
+                    "Rutina básica generada localmente",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    "Puedes usarla como plantilla y personalizarla editando series, repeticiones o cambiando grupos musculares con el botón de intercambio.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                )
+            }
         }
     }
 }

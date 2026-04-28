@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.rutinas
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.ListaEjerciciosLocal
 import com.example.zentra.data.local.ZentraCacheManager
 import com.example.zentra.data.remote.dto.PerfilDto
 import com.example.zentra.data.remote.gemini.GeminiGeneradorRutinas
@@ -104,13 +105,20 @@ class RutinasViewModel @Inject constructor(
     // ─── Cuestionario ─────────────────────────────────────────────────────────
 
     fun iniciarCuestionario() {
-        _estado.value = EstadoRutinas.EnCuestionario(paso = 1, datos = DatosCuestionario(), sexo = sexoUsuario)
-        Log.d("RutinasViewModel", "Cuestionario iniciado en el paso 1.")
+        _estado.value = EstadoRutinas.EnCuestionario(paso = 1, datos = DatosCuestionario(generarConIA = true), sexo = sexoUsuario)
+        Log.d("RutinasViewModel", "Cuestionario IA iniciado en el paso 1.")
+    }
+
+    fun iniciarCuestionarioLocal() {
+        _estado.value = EstadoRutinas.EnCuestionario(paso = 1, datos = DatosCuestionario(generarConIA = false), sexo = sexoUsuario)
+        Log.d("RutinasViewModel", "Cuestionario rutina básica iniciado en el paso 1.")
     }
 
     fun siguientePaso() {
         val actual = _estado.value as? EstadoRutinas.EnCuestionario ?: return
-        if (actual.paso < 4) {
+        // La rutina básica tiene 3 pasos (sin lesiones); la IA tiene 4
+        val maxPasos = if (actual.datos.generarConIA) 4 else 3
+        if (actual.paso < maxPasos) {
             _estado.value = actual.copy(paso = actual.paso + 1)
         } else {
             generarYGuardarRutina(actual.datos)
@@ -391,12 +399,18 @@ class RutinasViewModel @Inject constructor(
     // ─── Generación de rutina ────────────────────────────────────────────────
 
     /**
-     * Genera y guarda una nueva rutina. Comprueba el límite de 10 rutinas antes de proceder.
-     * Intenta primero con Gemini (esIA=true); si falla, usa el algoritmo local (esIA=false).
+     * Genera y guarda una nueva rutina.
+     * - Si [DatosCuestionario.generarConIA] = true: intenta Gemini (con fallback local si falla).
+     * - Si [DatosCuestionario.generarConIA] = false: usa directamente [ListaEjerciciosLocal] sin red.
      */
     private fun generarYGuardarRutina(datos: DatosCuestionario) {
         viewModelScope.launch {
-            _estado.value = EstadoRutinas.Generando("Consultando IA para personalizar tu rutina...", esIA = true)
+            _estado.value = if (datos.generarConIA) {
+                EstadoRutinas.Generando("Consultando IA para personalizar tu rutina...", esIA = true)
+            } else {
+                EstadoRutinas.Generando("Creando tu rutina básica...", esIA = false)
+            }
+
             try {
                 val userId = supabase.auth.currentUserOrNull()?.id
                     ?: throw Exception("No hay sesión activa.")
@@ -411,20 +425,29 @@ class RutinasViewModel @Inject constructor(
 
                 val niveles = experienciaANiveles(datos.experiencia)
                 val equipos = lugarAEquipos(datos.lugarEntrenamiento, datos.lugaresSeleccionados)
-
-                Log.d("RutinasViewModel", "Generando: ${datos.diasSemana}d, obj=${datos.objetivo}, niveles=$niveles, equipos=$equipos")
-
-                val ejercicios = rutinasRepositorio.obtenerEjercicios(equipos, niveles)
-                    .getOrDefault(emptyList())
-
                 val rutinaId = UUID.randomUUID().toString()
 
-                val dias = geminiGenerador.generarRutina(datos, ejercicios, rutinaId)
-                    ?: run {
-                        Log.d("RutinasViewModel", "Gemini no disponible, usando algoritmo local.")
-                        _estado.value = EstadoRutinas.Generando("Generando tu rutina...", esIA = false)
-                        generarDiasLocalmente(datos, ejercicios, rutinaId)
+                Log.d("RutinasViewModel", "Generando (IA=${datos.generarConIA}): ${datos.diasSemana}d, obj=${datos.objetivo}, equipos=$equipos")
+
+                val dias = if (datos.generarConIA) {
+                    // Camino IA: ejercicios de Supabase + Gemini, fallback local si no hay red
+                    val ejerciciosRed = rutinasRepositorio.obtenerEjercicios(equipos, niveles).getOrDefault(emptyList())
+                    val ejerciciosBase = ejerciciosRed.ifEmpty {
+                        Log.d("RutinasViewModel", "Sin ejercicios en red, usando lista local como base.")
+                        ListaEjerciciosLocal.obtenerEjercicios(equipos, niveles)
                     }
+                    geminiGenerador.generarRutina(datos, ejerciciosBase, rutinaId)
+                        ?: run {
+                            Log.d("RutinasViewModel", "Gemini no disponible. Fallback al algoritmo local.")
+                            _estado.value = EstadoRutinas.Generando("Generando tu rutina...", esIA = false)
+                            generarDiasLocalmente(datos, ejerciciosBase, rutinaId)
+                        }
+                } else {
+                    // Camino local: lista hardcodeada, sin llamadas a red
+                    val ejerciciosLocales = ListaEjerciciosLocal.obtenerEjercicios(equipos, niveles)
+                    Log.d("RutinasViewModel", "Usando ${ejerciciosLocales.size} ejercicios locales.")
+                    generarDiasLocalmente(datos, ejerciciosLocales, rutinaId)
+                }
 
                 val rutina = RutinaUsuario(
                     id = rutinaId,
@@ -437,11 +460,16 @@ class RutinasViewModel @Inject constructor(
 
                 rutinasRepositorio.desactivarRutinaActiva(userId)
                 rutinasRepositorio.guardarRutina(rutina, dias).getOrThrow()
-
                 cacheManager.guardarRutinaActiva(rutina, dias)
+
                 val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
-                Log.d("RutinasViewModel", "Rutina $rutinaId guardada con ${dias.size} días.")
-                _estado.value = EstadoRutinas.RutinaActiva(rutina, dias, todasLasRutinas = todas, sexo = sexoUsuario)
+                Log.d("RutinasViewModel", "Rutina $rutinaId guardada con ${dias.size} días. EsBasica=${!datos.generarConIA}")
+                _estado.value = EstadoRutinas.RutinaActiva(
+                    rutina, dias,
+                    todasLasRutinas = todas,
+                    sexo = sexoUsuario,
+                    esRutinaBasica = !datos.generarConIA
+                )
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al generar la rutina: ${e.message}")
                 _estado.value = EstadoRutinas.Error("No se pudo generar tu rutina. Inténtalo de nuevo.")
@@ -598,7 +626,8 @@ sealed class EstadoRutinas {
         val rutinaParaEliminar: RutinaUsuario? = null,
         val ejercicioEditando: EjercicioEditando? = null,
         val sustitucionEnCurso: Pair<Int, Int>? = null,
-        val sinConexion: Boolean = false
+        val sinConexion: Boolean = false,
+        val esRutinaBasica: Boolean = false
     ) : EstadoRutinas()
 
     data class Error(val mensaje: String) : EstadoRutinas()
@@ -627,5 +656,6 @@ data class DatosCuestionario(
     val lugarEntrenamiento: String = "Gimnasio grande",
     val materialDisponible: String = "",
     val lugaresSeleccionados: List<String> = emptyList(),
-    val lesiones: String = ""
+    val lesiones: String = "",
+    val generarConIA: Boolean = true
 )
