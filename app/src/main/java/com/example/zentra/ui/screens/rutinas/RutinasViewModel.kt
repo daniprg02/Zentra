@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.rutinas
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.ZentraCacheManager
 import com.example.zentra.data.remote.dto.PerfilDto
 import com.example.zentra.data.remote.gemini.GeminiGeneradorRutinas
 import com.example.zentra.domain.model.DiaRutina
@@ -31,12 +32,15 @@ import javax.inject.Inject
  * - Respetar los límites de ejercicios por día según la experiencia del usuario.
  * - Gestionar el historial (máximo 10 rutinas), activación y eliminación.
  * - Permitir editar series/repeticiones y sustituir ejercicios por IA.
+ * - Cambiar el grupo muscular de un ejercicio sin repetir los ya presentes en el día.
+ * - Funcionar en modo sin conexión mostrando la rutina cacheada.
  */
 @HiltViewModel
 class RutinasViewModel @Inject constructor(
     private val supabase: SupabaseClient,
     private val rutinasRepositorio: IRutinasRepositorio,
-    private val geminiGenerador: GeminiGeneradorRutinas
+    private val geminiGenerador: GeminiGeneradorRutinas,
+    private val cacheManager: ZentraCacheManager
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow<EstadoRutinas>(EstadoRutinas.Cargando)
@@ -75,6 +79,7 @@ class RutinasViewModel @Inject constructor(
 
                 _estado.value = if (activa != null) {
                     val (cabecera, dias) = activa
+                    cacheManager.guardarRutinaActiva(cabecera, dias)
                     Log.d("RutinasViewModel", "Rutina activa: ${dias.size} días. Total guardadas: ${todas.size}.")
                     EstadoRutinas.RutinaActiva(cabecera = cabecera, dias = dias, todasLasRutinas = todas, sexo = sexoUsuario)
                 } else {
@@ -83,7 +88,15 @@ class RutinasViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al cargar la rutina activa: ${e.message}")
-                _estado.value = EstadoRutinas.Error("No se pudo cargar tu plan. Comprueba tu conexión.")
+                val cacheada = cacheManager.cargarRutinaActiva()
+                _estado.value = if (cacheada != null) {
+                    val (cabecera, dias) = cacheada
+                    Log.d("RutinasViewModel", "Sin conexión: mostrando rutina cacheada (${dias.size} días).")
+                    EstadoRutinas.RutinaActiva(cabecera = cabecera, dias = dias, sexo = sexoUsuario, sinConexion = true)
+                } else {
+                    Log.d("RutinasViewModel", "Sin conexión y sin caché. Mostrando estado vacío.")
+                    EstadoRutinas.SinRutina(sinConexion = true)
+                }
             }
         }
     }
@@ -140,13 +153,20 @@ class RutinasViewModel @Inject constructor(
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
         val dia = actual.dias.find { it.diaNumero == diaNumero } ?: return
         val ejercicio = dia.ejercicios.getOrNull(ejercicioIdx) ?: return
+        // Grupos ocupados por otros ejercicios del mismo día (excluye el ejercicio actual)
+        val gruposOcupados = dia.ejercicios
+            .filterIndexed { i, _ -> i != ejercicioIdx }
+            .map { it.grupoMuscular }
+            .distinct()
         _estado.value = actual.copy(
             ejercicioEditando = EjercicioEditando(
                 diaNumero = diaNumero,
                 ejercicioIdx = ejercicioIdx,
                 series = ejercicio.series,
                 repeticiones = ejercicio.repeticiones,
-                nombreEjercicio = ejercicio.nombre
+                nombreEjercicio = ejercicio.nombre,
+                grupoMuscular = ejercicio.grupoMuscular,
+                gruposOcupadosEnDia = gruposOcupados
             )
         )
     }
@@ -180,8 +200,8 @@ class RutinasViewModel @Inject constructor(
     }
 
     /**
-     * Sustituye un ejercicio concreto por otro del mismo grupo muscular generado con IA.
-     * Excluye los ejercicios que ya están en ese día para evitar repeticiones.
+     * Sustituye un ejercicio por otro del mismo grupo muscular generado con IA.
+     * Excluye los ejercicios ya presentes en el día para evitar repeticiones.
      */
     fun sustituirEjercicioConIA(diaNumero: Int, ejercicioIdx: Int) {
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
@@ -196,7 +216,6 @@ class RutinasViewModel @Inject constructor(
                 }
                 val idsEnDia = dia.ejercicios.map { it.ejercicioId }.toSet()
 
-                // Obtiene el catálogo completo para buscar en todos los grupos/equipos posibles
                 val todos = rutinasRepositorio.obtenerEjercicios(
                     equipos = listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia"),
                     niveles = listOf("Principiante", "Intermedio", "Avanzado")
@@ -238,6 +257,69 @@ class RutinasViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Cambia el grupo muscular de un ejercicio y genera uno nuevo de ese grupo con IA.
+     * No permite seleccionar grupos ya presentes en ese día (evita duplicados).
+     * El usuario puede repetir la acción hasta encontrar un ejercicio de su gusto.
+     */
+    fun cambiarGrupoMuscularEjercicio(nuevoGrupo: String) {
+        val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
+        val edicion = actual.ejercicioEditando ?: return
+        viewModelScope.launch {
+            _estado.value = actual.copy(
+                sustitucionEnCurso = edicion.diaNumero to edicion.ejercicioIdx,
+                ejercicioEditando = null
+            )
+            try {
+                val dia = actual.dias.find { it.diaNumero == edicion.diaNumero } ?: run {
+                    _estado.value = actual.copy(sustitucionEnCurso = null); return@launch
+                }
+                val ejercicioActual = dia.ejercicios.getOrNull(edicion.ejercicioIdx) ?: run {
+                    _estado.value = actual.copy(sustitucionEnCurso = null); return@launch
+                }
+                val idsEnDia = dia.ejercicios.map { it.ejercicioId }.toSet()
+
+                val todos = rutinasRepositorio.obtenerEjercicios(
+                    equipos = listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia"),
+                    niveles = listOf("Principiante", "Intermedio", "Avanzado")
+                ).getOrDefault(emptyList())
+
+                val candidatos = todos.filter {
+                    it.grupoMuscular == nuevoGrupo && it.id !in idsEnDia
+                }
+
+                if (candidatos.isEmpty()) {
+                    Log.d("RutinasViewModel", "Sin candidatos para el grupo '$nuevoGrupo'. Sin cambios.")
+                    _estado.value = actual.copy(sustitucionEnCurso = null)
+                    return@launch
+                }
+
+                val elegido = geminiGenerador.generarSustituto(
+                    ejercicioActual = ejercicioActual.nombre,
+                    grupoMuscular = nuevoGrupo,
+                    candidatos = candidatos
+                ) ?: candidatos.random()
+
+                val nuevosEjercicios = dia.ejercicios.toMutableList()
+                nuevosEjercicios[edicion.ejercicioIdx] = EjercicioEnRutina(
+                    ejercicioId = elegido.id,
+                    nombre = elegido.nombre,
+                    grupoMuscular = elegido.grupoMuscular,
+                    series = ejercicioActual.series,
+                    repeticiones = ejercicioActual.repeticiones
+                )
+                val diaActualizado = dia.copy(ejercicios = nuevosEjercicios)
+                rutinasRepositorio.actualizarDiaRutina(diaActualizado).getOrThrow()
+                val nuevosDias = actual.dias.map { if (it.diaNumero == edicion.diaNumero) diaActualizado else it }
+                Log.d("RutinasViewModel", "Grupo cambiado: '${ejercicioActual.grupoMuscular}' → '$nuevoGrupo'. Ejercicio: '${elegido.nombre}'.")
+                _estado.value = actual.copy(dias = nuevosDias, sustitucionEnCurso = null)
+            } catch (e: Exception) {
+                Log.e("RutinasViewModel", "Error al cambiar grupo muscular: ${e.message}")
+                _estado.value = actual.copy(sustitucionEnCurso = null)
+            }
+        }
+    }
+
     // ─── Gestión del historial de rutinas ────────────────────────────────────
 
     fun activarRutina(rutina: RutinaUsuario) {
@@ -253,9 +335,11 @@ class RutinasViewModel @Inject constructor(
                 val dias = rutinasRepositorio.obtenerDiasDeRutina(rutina.id).getOrThrow()
                 val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
 
+                val nuevaCabecera = rutina.copy(activa = true)
+                cacheManager.guardarRutinaActiva(nuevaCabecera, dias)
                 Log.d("RutinasViewModel", "Rutina '${rutina.id}' activada. ${dias.size} días cargados.")
                 _estado.value = EstadoRutinas.RutinaActiva(
-                    cabecera = rutina.copy(activa = true),
+                    cabecera = nuevaCabecera,
                     dias = dias,
                     todasLasRutinas = todas,
                     sexo = sexoUsuario
@@ -308,16 +392,15 @@ class RutinasViewModel @Inject constructor(
 
     /**
      * Genera y guarda una nueva rutina. Comprueba el límite de 10 rutinas antes de proceder.
-     * Intenta primero con Gemini; si falla, usa el algoritmo local como fallback.
+     * Intenta primero con Gemini (esIA=true); si falla, usa el algoritmo local (esIA=false).
      */
     private fun generarYGuardarRutina(datos: DatosCuestionario) {
         viewModelScope.launch {
-            _estado.value = EstadoRutinas.Generando("Consultando IA para personalizar tu rutina...")
+            _estado.value = EstadoRutinas.Generando("Consultando IA para personalizar tu rutina...", esIA = true)
             try {
                 val userId = supabase.auth.currentUserOrNull()?.id
                     ?: throw Exception("No hay sesión activa.")
 
-                // Verificar que no se supera el límite de rutinas guardadas
                 val todasLasRutinas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
                 if (todasLasRutinas.size >= 10) {
                     _estado.value = EstadoRutinas.Error(
@@ -339,7 +422,7 @@ class RutinasViewModel @Inject constructor(
                 val dias = geminiGenerador.generarRutina(datos, ejercicios, rutinaId)
                     ?: run {
                         Log.d("RutinasViewModel", "Gemini no disponible, usando algoritmo local.")
-                        _estado.value = EstadoRutinas.Generando("Generando tu rutina...")
+                        _estado.value = EstadoRutinas.Generando("Generando tu rutina...", esIA = false)
                         generarDiasLocalmente(datos, ejercicios, rutinaId)
                     }
 
@@ -355,13 +438,10 @@ class RutinasViewModel @Inject constructor(
                 rutinasRepositorio.desactivarRutinaActiva(userId)
                 rutinasRepositorio.guardarRutina(rutina, dias).getOrThrow()
 
+                cacheManager.guardarRutinaActiva(rutina, dias)
                 val todas = rutinasRepositorio.obtenerTodasLasRutinas(userId).getOrDefault(emptyList())
                 Log.d("RutinasViewModel", "Rutina $rutinaId guardada con ${dias.size} días.")
-                _estado.value = EstadoRutinas.RutinaActiva(
-                    rutina, dias,
-                    todasLasRutinas = todas,
-                    sexo = sexoUsuario
-                )
+                _estado.value = EstadoRutinas.RutinaActiva(rutina, dias, todasLasRutinas = todas, sexo = sexoUsuario)
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al generar la rutina: ${e.message}")
                 _estado.value = EstadoRutinas.Error("No se pudo generar tu rutina. Inténtalo de nuevo.")
@@ -387,11 +467,9 @@ class RutinasViewModel @Inject constructor(
                 val cantidad = if (musculo in datos.musculosPrioritarios) 3 else 2
                 pool.shuffled().take(cantidad.coerceAtMost(pool.size))
             }
-            // Aplicar límites por experiencia: nunca más del máximo, ni menos del mínimo si hay suficientes
             val ejerciciosDelDia = when {
                 ejerciciosCombinados.size > maxEj -> ejerciciosCombinados.take(maxEj)
                 ejerciciosCombinados.size < minEj && ejercicios.size >= minEj -> {
-                    // Rellenar con ejercicios adicionales del catálogo si no hay suficientes del split
                     val extra = ejercicios.filter { it !in ejerciciosCombinados }.shuffled()
                     (ejerciciosCombinados + extra).take(minEj)
                 }
@@ -423,15 +501,11 @@ class RutinasViewModel @Inject constructor(
         else -> listOf("Principiante", "Intermedio", "Avanzado")
     }
 
-    /**
-     * Devuelve el rango (mínimo, máximo) de ejercicios por día según la experiencia.
-     * Estos límites se aplican tanto al algoritmo local como al prompt de Gemini.
-     */
     internal fun experienciaAMinMax(experiencia: String): Pair<Int, Int> = when (experiencia) {
         "Nunca he entrenado", "Menos de 1 mes" -> 3 to 4
         "1 a 3 meses", "3 a 6 meses" -> 4 to 5
         "6 a 12 meses" -> 5 to 6
-        else -> 6 to 7  // Más de 1 año
+        else -> 6 to 7
     }
 
     private fun lugarBaseAEquipos(lugar: String): List<String> = when (lugar) {
@@ -439,7 +513,7 @@ class RutinasViewModel @Inject constructor(
         "Calle" -> listOf("Calistenia")
         "Gimnasio mediano" -> listOf("Barra", "Mancuernas", "Cable", "Calistenia")
         "Gimnasio pequeño" -> listOf("Mancuernas", "Cable", "Calistenia")
-        else -> listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia") // Gimnasio grande
+        else -> listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia")
     }
 
     private fun lugarAEquipos(lugar: String, lugaresSeleccionados: List<String>): List<String> {
@@ -500,7 +574,8 @@ sealed class EstadoRutinas {
 
     data class SinRutina(
         val todasLasRutinas: List<RutinaUsuario> = emptyList(),
-        val rutinaParaEliminar: RutinaUsuario? = null
+        val rutinaParaEliminar: RutinaUsuario? = null,
+        val sinConexion: Boolean = false
     ) : EstadoRutinas()
 
     data class EnCuestionario(
@@ -509,7 +584,10 @@ sealed class EstadoRutinas {
         val sexo: String = "Masculino"
     ) : EstadoRutinas()
 
-    data class Generando(val mensaje: String = "Generando tu rutina...") : EstadoRutinas()
+    data class Generando(
+        val mensaje: String = "Generando tu rutina...",
+        val esIA: Boolean = true
+    ) : EstadoRutinas()
 
     data class RutinaActiva(
         val cabecera: RutinaUsuario,
@@ -519,8 +597,8 @@ sealed class EstadoRutinas {
         val mostrandoDialogoNueva: Boolean = false,
         val rutinaParaEliminar: RutinaUsuario? = null,
         val ejercicioEditando: EjercicioEditando? = null,
-        // Par (diaNumero, ejercicioIdx) del ejercicio que se está sustituyendo con IA
-        val sustitucionEnCurso: Pair<Int, Int>? = null
+        val sustitucionEnCurso: Pair<Int, Int>? = null,
+        val sinConexion: Boolean = false
     ) : EstadoRutinas()
 
     data class Error(val mensaje: String) : EstadoRutinas()
@@ -528,18 +606,17 @@ sealed class EstadoRutinas {
 
 /**
  * Estado del diálogo de edición de un ejercicio concreto.
- * @param diaNumero Número del día de la rutina donde está el ejercicio.
- * @param ejercicioIdx Índice del ejercicio dentro de la lista del día.
- * @param series Series actuales que se muestran en el diálogo.
- * @param repeticiones Repeticiones actuales que se muestran en el diálogo.
- * @param nombreEjercicio Nombre del ejercicio que se está editando.
+ * @param grupoMuscular Grupo muscular actual del ejercicio (para mostrar en el diálogo).
+ * @param gruposOcupadosEnDia Grupos ya presentes en ese día por otros ejercicios (excluye el actual).
  */
 data class EjercicioEditando(
     val diaNumero: Int,
     val ejercicioIdx: Int,
     val series: Int,
     val repeticiones: String,
-    val nombreEjercicio: String
+    val nombreEjercicio: String,
+    val grupoMuscular: String = "",
+    val gruposOcupadosEnDia: List<String> = emptyList()
 )
 
 data class DatosCuestionario(
@@ -550,6 +627,5 @@ data class DatosCuestionario(
     val lugarEntrenamiento: String = "Gimnasio grande",
     val materialDisponible: String = "",
     val lugaresSeleccionados: List<String> = emptyList(),
-    // Lesiones o limitaciones físicas descritas libremente por el usuario
     val lesiones: String = ""
 )

@@ -1,12 +1,19 @@
 package com.example.zentra.ui.screens.rutinas
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,15 +41,15 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.FitnessCenter
-import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -70,11 +76,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.zentra.domain.model.DiaRutina
@@ -97,12 +107,10 @@ private val OPCIONES_EXPERIENCIA = listOf(
     "3 a 6 meses", "6 a 12 meses", "Más de 1 año"
 )
 
-// Opciones principales de lugar. Mixto activa la selección secundaria de hasta 2 lugares.
 private val OPCIONES_LUGAR = listOf(
     "Casa", "Calle", "Gimnasio grande", "Gimnasio mediano", "Gimnasio pequeño", "Mixto"
 )
 
-// Lugares disponibles para combinar cuando se elige Mixto
 private val OPCIONES_LUGAR_MIXTO = listOf(
     "Casa", "Calle", "Gimnasio grande", "Gimnasio mediano", "Gimnasio pequeño"
 )
@@ -117,6 +125,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
         is EstadoRutinas.SinRutina -> PantallaSinRutina(
             todasLasRutinas = s.todasLasRutinas,
             rutinaParaEliminar = s.rutinaParaEliminar,
+            sinConexion = s.sinConexion,
             onIniciarCuestionario = viewModel::iniciarCuestionario,
             onActivarRutina = viewModel::activarRutina,
             onPedirEliminar = viewModel::pedirEliminarRutina,
@@ -133,7 +142,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             onAtras = viewModel::anteriorPaso
         )
 
-        is EstadoRutinas.Generando -> PantallaGenerando(mensaje = s.mensaje)
+        is EstadoRutinas.Generando -> PantallaGenerando(mensaje = s.mensaje, esIA = s.esIA)
 
         is EstadoRutinas.RutinaActiva -> PantallaRutinaActiva(
             cabecera = s.cabecera,
@@ -144,6 +153,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             rutinaParaEliminar = s.rutinaParaEliminar,
             ejercicioEditando = s.ejercicioEditando,
             sustitucionEnCurso = s.sustitucionEnCurso,
+            sinConexion = s.sinConexion,
             onPedirNuevaRutina = viewModel::pedirNuevaRutina,
             onCancelarNuevaRutina = viewModel::cancelarNuevaRutina,
             onConfirmarNuevaRutina = viewModel::confirmarNuevaRutina,
@@ -154,7 +164,8 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             onIniciarEdicion = viewModel::iniciarEdicionEjercicio,
             onCancelarEdicion = viewModel::cancelarEdicionEjercicio,
             onGuardarEdicion = viewModel::guardarEdicionEjercicio,
-            onSustituirConIA = viewModel::sustituirEjercicioConIA
+            onSustituirConIA = viewModel::sustituirEjercicioConIA,
+            onCambiarGrupoMuscular = viewModel::cambiarGrupoMuscularEjercicio
         )
 
         is EstadoRutinas.Error -> PantallaError(
@@ -172,6 +183,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
 private fun PantallaSinRutina(
     todasLasRutinas: List<RutinaUsuario>,
     rutinaParaEliminar: RutinaUsuario?,
+    sinConexion: Boolean,
     onIniciarCuestionario: () -> Unit,
     onActivarRutina: (RutinaUsuario) -> Unit,
     onPedirEliminar: (RutinaUsuario) -> Unit,
@@ -184,70 +196,74 @@ private fun PantallaSinRutina(
         onConfirmar = onConfirmarEliminar
     )
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                Box(
-                    modifier = Modifier.size(96.dp).clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Outlined.FitnessCenter, contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (sinConexion) BannerSinConexion()
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier.size(96.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.FitnessCenter, contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        "Tu plan de entrenamiento",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Responde unas preguntas rápidas y Zentra diseñará una rutina adaptada a ti.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(onClick = onIniciarCuestionario, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Generar mi rutina")
+                    }
+                }
+            }
+
+            if (todasLasRutinas.isNotEmpty()) {
+                item {
+                    Text(
+                        "RUTINAS GUARDADAS",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Spacer(modifier = Modifier.height(20.dp))
-                Text(
-                    "Tu plan de entrenamiento",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "Responde unas preguntas rápidas y Zentra diseñará una rutina adaptada a ti.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(onClick = onIniciarCuestionario, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Generar mi rutina")
+                items(todasLasRutinas, key = { it.id }) { rutina ->
+                    TarjetaRutinaHistorial(
+                        rutina = rutina,
+                        esActiva = rutina.activa,
+                        onActivar = { onActivarRutina(rutina) },
+                        onEliminar = { onPedirEliminar(rutina) }
+                    )
                 }
-            }
-        }
-
-        if (todasLasRutinas.isNotEmpty()) {
-            item {
-                Text(
-                    "RUTINAS GUARDADAS",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            items(todasLasRutinas, key = { it.id }) { rutina ->
-                TarjetaRutinaHistorial(
-                    rutina = rutina,
-                    esActiva = rutina.activa,
-                    onActivar = { onActivarRutina(rutina) },
-                    onEliminar = { onPedirEliminar(rutina) }
-                )
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────
-// Cuestionario de generación (3 pasos)
+// Cuestionario de generación (4 pasos)
 // ─────────────────────────────────────────────
 
 @Composable
@@ -334,7 +350,6 @@ private fun PasoMusculosPrioritarios(
     sexo: String,
     onActualizar: (DatosCuestionario) -> Unit
 ) {
-    // Para el diagrama, los músculos seleccionados se muestran al máximo de intensidad
     val frecuenciaParaDiagrama = remember(datos.musculosPrioritarios) {
         datos.musculosPrioritarios.associateWith { 5 }
     }
@@ -349,7 +364,6 @@ private fun PasoMusculosPrioritarios(
         )
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Diagrama anatómico que resalta en tiempo real los músculos seleccionados
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -358,9 +372,7 @@ private fun PasoMusculosPrioritarios(
             DiagramaCuerpoHumano(
                 musculosFrecuencia = frecuenciaParaDiagrama,
                 sexo = sexo,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 14.dp)
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp)
             )
         }
 
@@ -427,14 +439,12 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
         Text("¿Dónde vas a entrenar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Chips de selección principal de lugar
         OPCIONES_LUGAR.chunked(2).forEach { fila ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 fila.forEach { lugar ->
                     FilterChip(
                         selected = datos.lugarEntrenamiento == lugar,
                         onClick = {
-                            // Al cambiar de lugar: limpia el material y las selecciones de Mixto
                             onActualizar(
                                 datos.copy(
                                     lugarEntrenamiento = lugar,
@@ -452,7 +462,6 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Campo de material si entrena en casa o en la calle
         if (datos.lugarEntrenamiento == "Casa" || datos.lugarEntrenamiento == "Calle") {
             Spacer(modifier = Modifier.height(8.dp))
             val placeholder = if (datos.lugarEntrenamiento == "Casa")
@@ -475,14 +484,9 @@ private fun PasoExperienciaYLugar(datos: DatosCuestionario, onActualizar: (Datos
             )
         }
 
-        // Selección secundaria para Mixto: hasta 2 lugares, numerados con "1" y "2"
         if (datos.lugarEntrenamiento == "Mixto") {
             Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "Selecciona hasta 2 lugares:",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            Text("Selecciona hasta 2 lugares:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(8.dp))
             OPCIONES_LUGAR_MIXTO.chunked(2).forEach { fila ->
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -547,14 +551,79 @@ private fun PasoLesiones(datos: DatosCuestionario, onActualizar: (DatosCuestiona
 // ─────────────────────────────────────────────
 
 @Composable
-private fun PantallaGenerando(mensaje: String = "Generando tu rutina...") {
+private fun PantallaGenerando(mensaje: String, esIA: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ia_pulse")
+    val escala by infiniteTransition.animateFloat(
+        initialValue = 0.88f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "escala_ia"
+    )
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha_ia"
+    )
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator(modifier = Modifier.size(56.dp))
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(mensaje, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Puede tardar unos segundos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        ) {
+            if (esIA) {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .scale(escala)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    Color(0xFF9B4DCA).copy(alpha = alpha),
+                                    Color(0xFF2563EB).copy(alpha = alpha)
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "INTELIGENCIA ARTIFICIAL",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF7B2FBE),
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp
+                )
+            } else {
+                CircularProgressIndicator(modifier = Modifier.size(56.dp))
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                mensaje,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Puede tardar unos segundos",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -573,6 +642,7 @@ private fun PantallaRutinaActiva(
     rutinaParaEliminar: RutinaUsuario?,
     ejercicioEditando: EjercicioEditando?,
     sustitucionEnCurso: Pair<Int, Int>?,
+    sinConexion: Boolean,
     onPedirNuevaRutina: () -> Unit,
     onCancelarNuevaRutina: () -> Unit,
     onConfirmarNuevaRutina: () -> Unit,
@@ -583,7 +653,8 @@ private fun PantallaRutinaActiva(
     onIniciarEdicion: (diaNumero: Int, ejercicioIdx: Int) -> Unit,
     onCancelarEdicion: () -> Unit,
     onGuardarEdicion: (series: Int, reps: String) -> Unit,
-    onSustituirConIA: (diaNumero: Int, ejercicioIdx: Int) -> Unit
+    onSustituirConIA: (diaNumero: Int, ejercicioIdx: Int) -> Unit,
+    onCambiarGrupoMuscular: (String) -> Unit
 ) {
     val expandidos = remember { mutableStateMapOf<Int, Boolean>() }
 
@@ -615,18 +686,51 @@ private fun PantallaRutinaActiva(
     DialogoEditarEjercicio(
         edicion = ejercicioEditando,
         onCancelar = onCancelarEdicion,
-        onGuardar = onGuardarEdicion
+        onGuardar = onGuardarEdicion,
+        onCambiarGrupoMuscular = onCambiarGrupoMuscular
     )
 
     val rutinasAnteriores = todasLasRutinas.filter { it.id != cabecera.id }
 
     Scaffold(
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onPedirNuevaRutina,
-                icon = { Icon(Icons.Outlined.Refresh, null) },
-                text = { Text("Nueva rutina") }
-            )
+            // FAB degradado con identidad de IA
+            Box(
+                modifier = Modifier
+                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFF7B2FBE), Color(0xFF2563EB)))
+                    )
+                    .clickable(onClick = onPedirNuevaRutina)
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.Center) {
+                        Text(
+                            "IA",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Nueva Rutina",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
     ) { paddingValues ->
         LazyColumn(
@@ -634,9 +738,12 @@ private fun PantallaRutinaActiva(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (sinConexion) {
+                item { BannerSinConexion() }
+            }
+
             item { CabeceraPlan(cabecera = cabecera) }
 
-            // Diagrama anatómico con las imágenes PNG reales
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -692,6 +799,32 @@ private fun PantallaRutinaActiva(
 // ─────────────────────────────────────────────
 // Componentes compartidos
 // ─────────────────────────────────────────────
+
+@Composable
+private fun BannerSinConexion() {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Outlined.WifiOff,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Text(
+                "Sin conexión · Mostrando datos guardados",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+}
 
 @Composable
 private fun TarjetaRutinaHistorial(
@@ -751,31 +884,120 @@ private fun DialogoEliminarRutina(rutina: RutinaUsuario?, onCancelar: () -> Unit
 }
 
 /**
- * Diálogo para editar las series y repeticiones de un ejercicio concreto.
- * Mantiene estado local hasta que el usuario pulsa Guardar.
+ * Diálogo para editar series, repeticiones y grupo muscular de un ejercicio.
+ * El botón de intercambio despliega burbujas coloreadas de grupos disponibles
+ * (excluye el grupo actual y los ya presentes en ese día).
  */
 @Composable
 private fun DialogoEditarEjercicio(
     edicion: EjercicioEditando?,
     onCancelar: () -> Unit,
-    onGuardar: (series: Int, reps: String) -> Unit
+    onGuardar: (series: Int, reps: String) -> Unit,
+    onCambiarGrupoMuscular: (String) -> Unit
 ) {
     if (edicion == null) return
 
     var seriesLocal by remember(edicion) { mutableStateOf(edicion.series) }
     var repsLocal by remember(edicion) { mutableStateOf(edicion.repeticiones) }
+    var mostraBurbujas by remember(edicion) { mutableStateOf(false) }
+
+    val colorGrupoActual = COLORES_MUSCULARES[edicion.grupoMuscular] ?: MaterialTheme.colorScheme.primary
+    val gruposDisponibles = TODOS_LOS_MUSCULOS.filter {
+        it != edicion.grupoMuscular && it !in edicion.gruposOcupadosEnDia
+    }
 
     AlertDialog(
         onDismissRequest = onCancelar,
         title = { Text("Editar ejercicio") },
         text = {
-            Column {
-                Text(edicion.nombreEjercicio, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    edicion.nombreEjercicio,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(12.dp))
+
+                // Burbuja del grupo muscular actual + icono de cambio
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = colorGrupoActual.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, colorGrupoActual)
+                    ) {
+                        Text(
+                            edicion.grupoMuscular,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colorGrupoActual,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (gruposDisponibles.isNotEmpty()) {
+                        Spacer(Modifier.width(6.dp))
+                        IconButton(
+                            onClick = { mostraBurbujas = !mostraBurbujas },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.SwapHoriz,
+                                contentDescription = "Cambiar grupo muscular",
+                                modifier = Modifier.size(18.dp),
+                                tint = if (mostraBurbujas) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Grid colapsable de grupos disponibles para cambiar
+                AnimatedVisibility(visible = mostraBurbujas) {
+                    Column(modifier = Modifier.padding(top = 10.dp)) {
+                        Text(
+                            "Cambiar a:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        gruposDisponibles.chunked(2).forEach { fila ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                fila.forEach { grupo ->
+                                    val colorGrupo = COLORES_MUSCULARES[grupo] ?: MaterialTheme.colorScheme.primary
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onCambiarGrupoMuscular(grupo) },
+                                        shape = RoundedCornerShape(50),
+                                        color = colorGrupo.copy(alpha = 0.12f),
+                                        border = BorderStroke(1.dp, colorGrupo)
+                                    ) {
+                                        Text(
+                                            grupo,
+                                            modifier = Modifier
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                .fillMaxWidth(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colorGrupo,
+                                            fontWeight = FontWeight.Medium,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                                if (fila.size < 2) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
                 Spacer(Modifier.height(16.dp))
 
                 Text("Series:", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(8.dp))
-                // horizontalScroll evita que los chips se corten en pantallas estrechas
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -803,9 +1025,7 @@ private fun DialogoEditarEjercicio(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onGuardar(seriesLocal, repsLocal) }) {
-                Text("Guardar")
-            }
+            TextButton(onClick = { onGuardar(seriesLocal, repsLocal) }) { Text("Guardar") }
         },
         dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
     )
@@ -908,7 +1128,6 @@ private fun ItemEjercicio(
     onEditar: () -> Unit,
     onSustituir: () -> Unit
 ) {
-    // Color identificativo del grupo muscular; si no está mapeado, se usa el color primario del tema
     val colorMusculo = COLORES_MUSCULARES[ejercicio.grupoMuscular]
         ?: MaterialTheme.colorScheme.primary
 
@@ -923,7 +1142,6 @@ private fun ItemEjercicio(
             Text(ejercicio.grupoMuscular, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (esSustituyendo) {
-            // Spinner mientras la IA genera el sustituto
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colorMusculo)
         } else {
             Text(
@@ -933,7 +1151,6 @@ private fun ItemEjercicio(
                 color = colorMusculo
             )
             Spacer(modifier = Modifier.width(4.dp))
-            // Editar series/repeticiones
             IconButton(onClick = onEditar, modifier = Modifier.size(32.dp)) {
                 Icon(
                     Icons.Outlined.Edit,
@@ -942,7 +1159,6 @@ private fun ItemEjercicio(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            // Sustituir por otro ejercicio del mismo grupo con IA
             IconButton(onClick = onSustituir, modifier = Modifier.size(32.dp)) {
                 Icon(
                     Icons.Outlined.Sync,

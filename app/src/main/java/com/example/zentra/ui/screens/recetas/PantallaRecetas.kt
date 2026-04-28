@@ -1,4 +1,4 @@
-package com.example.zentra.ui.screens.recetas
+﻿package com.example.zentra.ui.screens.recetas
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -12,64 +12,48 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.rememberSwipeToDismissBoxState
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -99,6 +83,7 @@ private fun colorParaReceta(id: String): Color =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaRecetas(
+    onNuevaReceta: () -> Unit = {},
     viewModel: RecetasViewModel = hiltViewModel()
 ) {
     val estado by viewModel.estado.collectAsStateWithLifecycle()
@@ -112,30 +97,6 @@ fun PantallaRecetas(
     val recetasFijadas by remember(estado.recetas) {
         derivedStateOf { estado.recetas.filter { it.fijada } }
     }
-    // Alimentos usados en recetas previas (con unidades y peso) para el desplegable del formulario
-    val alimentosGuardados by remember(estado.recetas) {
-        derivedStateOf {
-            estado.recetas
-                .flatMap { r ->
-                    r.ingredientes.split("\n", ",").mapNotNull { linea ->
-                        val raw = linea.trim()
-                        if (raw.length < 2) null
-                        else {
-                            val pesoG = if (raw.contains("("))
-                                raw.substringAfter("(").substringBefore(")").removeSuffix("g").trim()
-                            else ""
-                            val sinPeso = if (raw.contains("(")) raw.substringBefore("(").trim() else raw
-                            val unidades = sinPeso.takeWhile { it.isDigit() || it == '/' || it == '.' }.trim()
-                            val nombre = sinPeso.removePrefix(unidades).trim()
-                            if (nombre.length < 2) null
-                            else AlimentoGuardado(nombre = nombre, unidades = unidades, pesoG = pesoG)
-                        }
-                    }
-                }
-                .distinctBy { it.nombre }
-                .sortedBy { it.nombre }
-        }
-    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -144,58 +105,52 @@ fun PantallaRecetas(
                 mensaje = estado.error!!,
                 onReintentar = viewModel::cargarRecetas
             )
-            else -> ContenidoRecetas(
-                recetasFiltradas = recetasFiltradas,
-                recetasFijadas = recetasFijadas,
-                filtro = estado.filtro,
-                onFiltroChange = viewModel::actualizarFiltro,
-                onTogglePin = viewModel::toggleFijada,
-                onEliminar = viewModel::eliminarReceta
-            )
+            else -> androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+                if (estado.sinConexion) {
+                    androidx.compose.material3.Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.WifiOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "Sin conexión · Mostrando datos guardados",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+                ContenidoRecetas(
+                    recetasFiltradas = recetasFiltradas,
+                    recetasFijadas = recetasFijadas,
+                    filtro = estado.filtro,
+                    onFiltroChange = viewModel::actualizarFiltro,
+                    onTogglePin = viewModel::toggleFijada,
+                    onEliminar = viewModel::eliminarReceta
+                )
+            }
         }
 
         // FAB visible siempre que no estemos en estado de carga
         if (!estado.cargando) {
             ExtendedFloatingActionButton(
-                onClick = viewModel::mostrarFormulario,
+                onClick = onNuevaReceta,
                 icon = { Icon(Icons.Outlined.Add, contentDescription = null) },
                 text = { Text("Añadir receta") },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
-            )
-        }
-    }
-
-    BackHandler(enabled = estado.mostrandoFormulario) {
-        viewModel.ocultarFormulario()
-    }
-
-    // El BottomSheet se renderiza fuera del Box para que cubra toda la pantalla correctamente
-    if (estado.mostrandoFormulario) {
-        ModalBottomSheet(
-            onDismissRequest = { viewModel.ocultarFormulario() },
-            sheetState = rememberModalBottomSheetState(
-                skipPartiallyExpanded = true,
-                confirmValueChange = { it != SheetValue.Hidden }
-            ),
-            dragHandle = {}
-        ) {
-            ContenidoFormulario(
-                formulario = estado.formulario,
-                alimentosGuardados = alimentosGuardados,
-                onTituloChange = viewModel::actualizarTitulo,
-                onAgregarIngrediente = viewModel::agregarIngrediente,
-                onEliminarIngrediente = viewModel::eliminarIngrediente,
-                onActualizarUnidades = viewModel::actualizarUnidades,
-                onActualizarAlimento = viewModel::actualizarAlimento,
-                onActualizarPesoG = viewModel::actualizarPesoG,
-                onUsarAlimentoGuardado = viewModel::usarAlimentoGuardado,
-                onProteinasChange = viewModel::actualizarProteinas,
-                onCarbosChange = viewModel::actualizarCarbos,
-                onGrasasChange = viewModel::actualizarGrasas,
-                onGuardar = viewModel::guardarNuevaReceta,
-                onCancelar = viewModel::ocultarFormulario
             )
         }
     }
@@ -505,312 +460,6 @@ private fun BarraBusqueda(
         ),
         modifier = modifier.fillMaxWidth()
     )
-}
-
-// ─── Formulario de creación ───────────────────────────────────────────────────
-
-/**
- * Formulario de creación manual de recetas, presentado dentro de un ModalBottomSheet.
- * Las kcal se calculan automáticamente a partir de los macros introducidos (P×4 + C×4 + G×9).
- */
-@Composable
-private fun ContenidoFormulario(
-    formulario: FormularioNuevaReceta,
-    alimentosGuardados: List<AlimentoGuardado>,
-    onTituloChange: (String) -> Unit,
-    onAgregarIngrediente: () -> Unit,
-    onEliminarIngrediente: (Int) -> Unit,
-    onActualizarUnidades: (Int, String) -> Unit,
-    onActualizarAlimento: (Int, String) -> Unit,
-    onActualizarPesoG: (Int, String) -> Unit,
-    onUsarAlimentoGuardado: (AlimentoGuardado) -> Unit,
-    onProteinasChange: (String) -> Unit,
-    onCarbosChange: (String) -> Unit,
-    onGrasasChange: (String) -> Unit,
-    onGuardar: () -> Unit,
-    onCancelar: () -> Unit
-) {
-    val kcalCalculadas by remember(formulario.proteinas, formulario.carbos, formulario.grasas) {
-        derivedStateOf {
-            val p = formulario.proteinas.toFloatOrNull() ?: 0f
-            val c = formulario.carbos.toFloatOrNull() ?: 0f
-            val g = formulario.grasas.toFloatOrNull() ?: 0f
-            ((p * 4f) + (c * 4f) + (g * 9f)).toInt()
-        }
-    }
-    var alimentosDesplegados by remember { mutableStateOf(true) }
-    val alLimite = formulario.ingredientes.size >= 10
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .imePadding()
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // Cabecera
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Nueva receta",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            TextButton(onClick = onCancelar) { Text("Cancelar") }
-        }
-
-        // Título
-        OutlinedTextField(
-            value = formulario.titulo,
-            onValueChange = onTituloChange,
-            label = { Text("Título *") },
-            placeholder = { Text("Ej. Tortilla de 3 huevos") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // ── Sección ingredientes ───────────────────────────────────────────────
-
-        // Alimentos guardados en recetas anteriores (desplegable)
-        if (alimentosGuardados.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { alimentosDesplegados = !alimentosDesplegados }
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "ALIMENTOS USADOS ANTERIORMENTE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Icon(
-                    imageVector = Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .rotate(if (alimentosDesplegados) 180f else 0f),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            if (alimentosDesplegados) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Column scrollable con altura máxima (~7 items) — evita LazyColumn anidada dentro del scroll externo
-                    Column(modifier = Modifier
-                        .heightIn(max = 252.dp)
-                        .verticalScroll(rememberScrollState())
-                    ) {
-                        alimentosGuardados.take(20).forEach { alimento ->
-                            Text(
-                                text = alimento.nombre,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onUsarAlimentoGuardado(alimento) }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            HorizontalDivider(modifier = Modifier.padding(horizontal = 14.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // Encabezado de columnas
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Cant.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(62.dp))
-            Text("Alimento", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Text("Peso(g)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(68.dp))
-            Spacer(modifier = Modifier.size(32.dp))
-        }
-
-        // Una fila por cada ingrediente
-        formulario.ingredientes.forEachIndexed { idx, ing ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Cantidad: solo dígitos y /
-                OutlinedTextField(
-                    value = ing.unidades,
-                    onValueChange = { v -> onActualizarUnidades(idx, v.filter { it.isDigit() || it == '/' }) },
-                    placeholder = { Text("Ej. 1/2", style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.width(68.dp),
-                    textStyle = MaterialTheme.typography.bodySmall
-                )
-                // Nombre del alimento
-                OutlinedTextField(
-                    value = ing.alimento,
-                    onValueChange = { onActualizarAlimento(idx, it) },
-                    placeholder = { Text("Ej. huevo", style = MaterialTheme.typography.labelSmall) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f),
-                    textStyle = MaterialTheme.typography.bodySmall
-                )
-                // Peso en gramos
-                OutlinedTextField(
-                    value = ing.pesoG,
-                    onValueChange = { v -> onActualizarPesoG(idx, v.filter { it.isDigit() || it == '.' }) },
-                    placeholder = { Text("g", style = MaterialTheme.typography.labelSmall) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.width(62.dp),
-                    textStyle = MaterialTheme.typography.bodySmall
-                )
-                // Eliminar fila (solo si hay más de 1)
-                IconButton(
-                    onClick = { onEliminarIngrediente(idx) },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Outlined.Close,
-                        contentDescription = "Eliminar ingrediente",
-                        modifier = Modifier.size(16.dp),
-                        tint = if (formulario.ingredientes.size > 1)
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                    )
-                }
-            }
-        }
-
-        if (alLimite) {
-            Text(
-                text = "Límite de 10 ingredientes. Borra uno para añadir más.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            TextButton(
-                onClick = onAgregarIngrediente,
-                modifier = Modifier.align(Alignment.Start)
-            ) {
-                Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Añadir ingrediente", style = MaterialTheme.typography.labelMedium)
-            }
-        }
-
-        HorizontalDivider()
-
-        // Macronutrientes en fila de tres campos
-        Text(
-            text = "Macronutrientes",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            OutlinedTextField(
-                value = formulario.proteinas,
-                onValueChange = onProteinasChange,
-                label = { Text("Proteínas (g)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = formulario.carbos,
-                onValueChange = onCarbosChange,
-                label = { Text("Carbos (g)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = formulario.grasas,
-                onValueChange = onGrasasChange,
-                label = { Text("Grasas (g)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // Kcal calculadas (solo lectura, se actualiza en tiempo real)
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            ),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Calorías totales calculadas",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Text(
-                    text = "$kcalCalculadas kcal",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-        }
-
-        // Error de validación
-        if (formulario.error != null) {
-            Text(
-                text = formulario.error,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-
-        // Botón guardar
-        androidx.compose.material3.Button(
-            onClick = onGuardar,
-            enabled = !formulario.guardando,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            if (formulario.guardando) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            } else {
-                Text("Guardar receta", style = MaterialTheme.typography.labelLarge)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-    }
 }
 
 // ─── Estados auxiliares ───────────────────────────────────────────────────────

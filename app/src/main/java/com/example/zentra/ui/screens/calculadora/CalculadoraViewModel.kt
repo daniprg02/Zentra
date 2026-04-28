@@ -3,8 +3,10 @@ package com.example.zentra.ui.screens.calculadora
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.ZentraCacheManager
 import com.example.zentra.data.local.buscarEnMasterlist
 import com.example.zentra.data.remote.api.OpenFoodFactsService
+import com.example.zentra.domain.model.IngestaSlot
 import com.example.zentra.domain.model.MacrosDiarios
 import com.example.zentra.domain.model.NivelActividad
 import com.example.zentra.domain.model.ObjetivoFisico
@@ -43,7 +45,8 @@ class CalculadoraViewModel @Inject constructor(
     private val perfilRepositorio: IPerfilRepositorio,
     private val macrosRepositorio: IMacrosRepositorio,
     private val recetasRepositorio: IRecetasRepositorio,
-    private val foodService: OpenFoodFactsService
+    private val foodService: OpenFoodFactsService,
+    private val cacheManager: ZentraCacheManager
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(EstadoCalculadora())
@@ -69,6 +72,7 @@ class CalculadoraViewModel @Inject constructor(
                     ?: throw Exception("No hay sesión activa. Reinicia la aplicación.")
 
                 val perfil = perfilRepositorio.obtenerPerfil(userId).getOrThrow()
+                cacheManager.guardarPerfil(perfil)
                 Log.d("CalculadoraViewModel", "Perfil: ${perfil.apodo} | ${perfil.pesoKg}kg, ${perfil.alturaCm}cm, ${perfil.edad}a")
 
                 val objetivos = calcularObjetivosNutricionales(
@@ -116,6 +120,8 @@ class CalculadoraViewModel @Inject constructor(
                     }
                 }
 
+                val ingestasMap = macrosRepositorio.obtenerIngestasDelDia(userId, fecha).getOrDefault(emptyMap())
+
                 _estado.value = _estado.value.copy(
                     cargando = false,
                     apodo = perfil.apodo,
@@ -127,14 +133,41 @@ class CalculadoraViewModel @Inject constructor(
                     consumidoKcal = macrosHoy.consumidoKcal,
                     consumidoProteinasG = macrosHoy.consumidoProteinasG,
                     consumidoCarbosG = macrosHoy.consumidoCarbosG,
-                    consumidoGrasasG = macrosHoy.consumidoGrasasG
+                    consumidoGrasasG = macrosHoy.consumidoGrasasG,
+                    ingestasDelDia = ingestasMap
                 )
             } catch (e: Exception) {
                 Log.e("CalculadoraViewModel", "Error al cargar los datos del día: ${e.message}")
-                _estado.value = _estado.value.copy(
-                    cargando = false,
-                    error = "No se pudieron cargar los datos. Comprueba tu conexión."
-                )
+
+                // Intentar mostrar los objetivos desde el perfil cacheado localmente
+                val perfilCacheado = cacheManager.cargarPerfil()
+                if (perfilCacheado != null) {
+                    Log.d("CalculadoraViewModel", "Sin conexión: usando perfil cacheado de '${perfilCacheado.apodo}'.")
+                    val objetivos = calcularObjetivosNutricionales(
+                        perfil = perfilCacheado,
+                        nivel = _estado.value.nivelActividad,
+                        objetivo = _estado.value.objetivo
+                    )
+                    _estado.value = _estado.value.copy(
+                        cargando = false,
+                        apodo = perfilCacheado.apodo,
+                        objetivoKcal = objetivos.objetivoKcal,
+                        objetivoProteinasG = objetivos.proteinasG,
+                        objetivoCarbosG = objetivos.carbosG,
+                        objetivoGrasasG = objetivos.grasasG,
+                        consumidoKcal = 0,
+                        consumidoProteinasG = 0f,
+                        consumidoCarbosG = 0f,
+                        consumidoGrasasG = 0f,
+                        ingestasDelDia = emptyMap(),
+                        sinConexion = true
+                    )
+                } else {
+                    _estado.value = _estado.value.copy(
+                        cargando = false,
+                        error = "No se pudieron cargar los datos. Comprueba tu conexión."
+                    )
+                }
             }
         }
     }
@@ -193,8 +226,9 @@ class CalculadoraViewModel @Inject constructor(
     }
 
     /**
-     * Añade una receta (propia o resultado de búsqueda) al slot activo,
-     * suma sus macros a los totales del día y persiste en Supabase.
+     * Añade una receta (propia o resultado de búsqueda) al slot activo.
+     * Crea un [IngestaSlot] con los macros base de la receta (referencia 100 g),
+     * actualiza los totales del día y persiste tanto la ingesta como los macros en Supabase.
      */
     fun agregarRecetaASlot(receta: Receta) {
         viewModelScope.launch {
@@ -202,13 +236,25 @@ class CalculadoraViewModel @Inject constructor(
             val slotNombre = estadoActual.slotActivo ?: return@launch
             val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
 
-            val nuevoKcal = estadoActual.consumidoKcal + receta.kcalTotales
-            val nuevasProteinas = estadoActual.consumidoProteinasG + receta.proteinasG
-            val nuevosCarbos = estadoActual.consumidoCarbosG + receta.carbosG
-            val nuevasGrasas = estadoActual.consumidoGrasasG + receta.grasasG
+            val orden = estadoActual.ingestasDelDia[slotNombre]?.size ?: 0
+            val nuevoSlot = IngestaSlot(
+                dbId = UUID.randomUUID().toString(),
+                recetaTitulo = receta.titulo,
+                gramos = 100f,
+                baseKcal = receta.kcalTotales,
+                baseProteinasG = receta.proteinasG,
+                baseCarbosG = receta.carbosG,
+                baseGrasasG = receta.grasasG,
+                orden = orden
+            )
+
+            val nuevoKcal = estadoActual.consumidoKcal + nuevoSlot.kcalActual
+            val nuevasProteinas = estadoActual.consumidoProteinasG + nuevoSlot.proteinasActual
+            val nuevosCarbos = estadoActual.consumidoCarbosG + nuevoSlot.carbosActual
+            val nuevasGrasas = estadoActual.consumidoGrasasG + nuevoSlot.grasasActual
 
             val mapaActualizado = estadoActual.ingestasDelDia.toMutableMap()
-            mapaActualizado[slotNombre] = (mapaActualizado[slotNombre] ?: emptyList()) + receta
+            mapaActualizado[slotNombre] = (mapaActualizado[slotNombre] ?: emptyList()) + nuevoSlot
 
             _estado.value = estadoActual.copy(
                 consumidoKcal = nuevoKcal,
@@ -220,44 +266,47 @@ class CalculadoraViewModel @Inject constructor(
                 busquedaTexto = "",
                 resultadosBusqueda = emptyList()
             )
+            Log.d("CalculadoraViewModel", "IngestaSlot '${nuevoSlot.recetaTitulo}' añadida a '$slotNombre'. Total: $nuevoKcal kcal.")
 
-            Log.d("CalculadoraViewModel", "Receta '${receta.titulo}' añadida a '$slotNombre'. Total: $nuevoKcal kcal.")
-
-            val macrosActualizados = MacrosDiarios(
-                id = estadoActual.macrosDiariosId,
-                userId = userId,
-                fecha = estadoActual.fechaVisualizando,
-                objetivoKcal = estadoActual.objetivoKcal,
-                consumidoKcal = nuevoKcal,
-                consumidoProteinasG = nuevasProteinas,
-                consumidoCarbosG = nuevosCarbos,
-                consumidoGrasasG = nuevasGrasas
-            )
-            macrosRepositorio.guardarMacrosDelDia(macrosActualizados).onFailure { e ->
-                Log.e("CalculadoraViewModel", "Error al persistir macros tras añadir receta: ${e.message}")
+            macrosRepositorio.guardarIngesta(userId, estadoActual.fechaVisualizando, slotNombre, nuevoSlot).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al persistir ingesta tras añadir receta: ${e.message}")
+            }
+            macrosRepositorio.guardarMacrosDelDia(
+                MacrosDiarios(
+                    id = estadoActual.macrosDiariosId,
+                    userId = userId,
+                    fecha = estadoActual.fechaVisualizando,
+                    objetivoKcal = estadoActual.objetivoKcal,
+                    consumidoKcal = nuevoKcal,
+                    consumidoProteinasG = nuevasProteinas,
+                    consumidoCarbosG = nuevosCarbos,
+                    consumidoGrasasG = nuevasGrasas
+                )
+            ).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al persistir macros tras añadir ingesta: ${e.message}")
             }
         }
     }
 
     /**
-     * Elimina una receta de un slot, resta sus macros de los totales del día
-     * y actualiza el registro en Supabase.
+     * Elimina una ingesta de un slot, resta sus macros de los totales del día
+     * y borra la fila correspondiente en `daily_intakes`.
      */
-    fun eliminarRecetaDeSlot(nombreSlot: String, receta: Receta) {
+    fun eliminarRecetaDeSlot(nombreSlot: String, slot: IngestaSlot) {
         viewModelScope.launch {
             val estadoActual = _estado.value
             val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
 
             val mapaActualizado = estadoActual.ingestasDelDia.toMutableMap()
             val listaActualizada = (mapaActualizado[nombreSlot] ?: emptyList())
-                .toMutableList().also { it.remove(receta) }
+                .toMutableList().also { it.remove(slot) }
             if (listaActualizada.isEmpty()) mapaActualizado.remove(nombreSlot)
             else mapaActualizado[nombreSlot] = listaActualizada
 
-            val nuevoKcal = (estadoActual.consumidoKcal - receta.kcalTotales).coerceAtLeast(0)
-            val nuevasProteinas = (estadoActual.consumidoProteinasG - receta.proteinasG).coerceAtLeast(0f)
-            val nuevosCarbos = (estadoActual.consumidoCarbosG - receta.carbosG).coerceAtLeast(0f)
-            val nuevasGrasas = (estadoActual.consumidoGrasasG - receta.grasasG).coerceAtLeast(0f)
+            val nuevoKcal = (estadoActual.consumidoKcal - slot.kcalActual).coerceAtLeast(0)
+            val nuevasProteinas = (estadoActual.consumidoProteinasG - slot.proteinasActual).coerceAtLeast(0f)
+            val nuevosCarbos = (estadoActual.consumidoCarbosG - slot.carbosActual).coerceAtLeast(0f)
+            val nuevasGrasas = (estadoActual.consumidoGrasasG - slot.grasasActual).coerceAtLeast(0f)
 
             _estado.value = estadoActual.copy(
                 consumidoKcal = nuevoKcal,
@@ -266,21 +315,26 @@ class CalculadoraViewModel @Inject constructor(
                 consumidoGrasasG = nuevasGrasas,
                 ingestasDelDia = mapaActualizado
             )
+            Log.d("CalculadoraViewModel", "IngestaSlot '${slot.recetaTitulo}' eliminada de '$nombreSlot'. Total: $nuevoKcal kcal.")
 
-            Log.d("CalculadoraViewModel", "Receta '${receta.titulo}' eliminada de '$nombreSlot'. Total: $nuevoKcal kcal.")
-
-            val macrosActualizados = MacrosDiarios(
-                id = estadoActual.macrosDiariosId,
-                userId = userId,
-                fecha = estadoActual.fechaVisualizando,
-                objetivoKcal = estadoActual.objetivoKcal,
-                consumidoKcal = nuevoKcal,
-                consumidoProteinasG = nuevasProteinas,
-                consumidoCarbosG = nuevosCarbos,
-                consumidoGrasasG = nuevasGrasas
-            )
-            macrosRepositorio.guardarMacrosDelDia(macrosActualizados).onFailure { e ->
-                Log.e("CalculadoraViewModel", "Error al persistir macros tras eliminar receta: ${e.message}")
+            if (slot.dbId.isNotBlank()) {
+                macrosRepositorio.eliminarIngesta(slot.dbId).onFailure { e ->
+                    Log.e("CalculadoraViewModel", "Error al eliminar ingesta de BD: ${e.message}")
+                }
+            }
+            macrosRepositorio.guardarMacrosDelDia(
+                MacrosDiarios(
+                    id = estadoActual.macrosDiariosId,
+                    userId = userId,
+                    fecha = estadoActual.fechaVisualizando,
+                    objetivoKcal = estadoActual.objetivoKcal,
+                    consumidoKcal = nuevoKcal,
+                    consumidoProteinasG = nuevasProteinas,
+                    consumidoCarbosG = nuevosCarbos,
+                    consumidoGrasasG = nuevasGrasas
+                )
+            ).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al persistir macros tras eliminar ingesta: ${e.message}")
             }
         }
     }
@@ -341,9 +395,10 @@ class CalculadoraViewModel @Inject constructor(
     // ─── Edición de cantidad de ingesta ──────────────────────────────────────────
 
     /** Abre el diálogo de edición de gramos para una ingesta concreta del slot. */
-    fun abrirEdicionIngesta(slotNombre: String, receta: Receta) {
+    fun abrirEdicionIngesta(slotNombre: String, slot: IngestaSlot) {
+        val cantidadTexto = if (slot.gramos % 1f == 0f) slot.gramos.toInt().toString() else slot.gramos.toString()
         _estado.value = _estado.value.copy(
-            ingestaEditando = IngestaEditando(slotNombre = slotNombre, recetaOriginal = receta)
+            ingestaEditando = IngestaEditando(slotNombre = slotNombre, ingestaSlot = slot, cantidadTexto = cantidadTexto)
         )
     }
 
@@ -356,33 +411,28 @@ class CalculadoraViewModel @Inject constructor(
     }
 
     /**
-     * Aplica la cantidad editada escalando los macros con regla de tres (base = 100 g).
-     * Reemplaza la receta original en el slot y persiste los nuevos totales en Supabase.
+     * Aplica la cantidad editada actualizando [IngestaSlot.gramos].
+     * Los macros se recalculan desde la base invariante (100 g) eliminando cualquier
+     * error de redondeo acumulado por ediciones previas.
      */
     fun confirmarEdicionIngesta() {
         val edicion = _estado.value.ingestaEditando ?: return
         val cantidad = edicion.cantidadTexto.toFloatOrNull() ?: return
         if (cantidad <= 0f) return
 
-        val factor = cantidad / 100f
-        val recetaEscalada = edicion.recetaOriginal.copy(
-            kcalTotales = (edicion.recetaOriginal.kcalTotales * factor).toInt(),
-            proteinasG = edicion.recetaOriginal.proteinasG * factor,
-            carbosG = edicion.recetaOriginal.carbosG * factor,
-            grasasG = edicion.recetaOriginal.grasasG * factor
-        )
+        val slotActualizado = edicion.ingestaSlot.copy(gramos = cantidad)
 
         val estadoActual = _estado.value
         val mapaActualizado = estadoActual.ingestasDelDia.toMutableMap()
         val lista = (mapaActualizado[edicion.slotNombre] ?: emptyList()).toMutableList()
-        val idx = lista.indexOf(edicion.recetaOriginal)
-        if (idx >= 0) lista[idx] = recetaEscalada
+        val idx = lista.indexOfFirst { it.dbId == edicion.ingestaSlot.dbId }
+        if (idx >= 0) lista[idx] = slotActualizado
         mapaActualizado[edicion.slotNombre] = lista
 
-        val nuevoKcal = (estadoActual.consumidoKcal - edicion.recetaOriginal.kcalTotales + recetaEscalada.kcalTotales).coerceAtLeast(0)
-        val nuevasProteinas = (estadoActual.consumidoProteinasG - edicion.recetaOriginal.proteinasG + recetaEscalada.proteinasG).coerceAtLeast(0f)
-        val nuevosCarbos = (estadoActual.consumidoCarbosG - edicion.recetaOriginal.carbosG + recetaEscalada.carbosG).coerceAtLeast(0f)
-        val nuevasGrasas = (estadoActual.consumidoGrasasG - edicion.recetaOriginal.grasasG + recetaEscalada.grasasG).coerceAtLeast(0f)
+        val nuevoKcal = (estadoActual.consumidoKcal - edicion.ingestaSlot.kcalActual + slotActualizado.kcalActual).coerceAtLeast(0)
+        val nuevasProteinas = (estadoActual.consumidoProteinasG - edicion.ingestaSlot.proteinasActual + slotActualizado.proteinasActual).coerceAtLeast(0f)
+        val nuevosCarbos = (estadoActual.consumidoCarbosG - edicion.ingestaSlot.carbosActual + slotActualizado.carbosActual).coerceAtLeast(0f)
+        val nuevasGrasas = (estadoActual.consumidoGrasasG - edicion.ingestaSlot.grasasActual + slotActualizado.grasasActual).coerceAtLeast(0f)
 
         _estado.value = estadoActual.copy(
             consumidoKcal = nuevoKcal,
@@ -392,10 +442,13 @@ class CalculadoraViewModel @Inject constructor(
             ingestasDelDia = mapaActualizado,
             ingestaEditando = null
         )
-        Log.d("CalculadoraViewModel", "Ingesta '${edicion.recetaOriginal.titulo}' ajustada a ${cantidad}g → ${recetaEscalada.kcalTotales} kcal.")
+        Log.d("CalculadoraViewModel", "IngestaSlot '${edicion.ingestaSlot.recetaTitulo}' ajustada a ${cantidad}g → ${slotActualizado.kcalActual} kcal.")
 
         viewModelScope.launch {
             val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
+            macrosRepositorio.guardarIngesta(userId, estadoActual.fechaVisualizando, edicion.slotNombre, slotActualizado).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al persistir ingesta tras editar cantidad: ${e.message}")
+            }
             macrosRepositorio.guardarMacrosDelDia(
                 MacrosDiarios(
                     id = estadoActual.macrosDiariosId,
@@ -448,6 +501,9 @@ class CalculadoraViewModel @Inject constructor(
             )
             Log.d("CalculadoraViewModel", "Ingestas del día reiniciadas a cero.")
 
+            macrosRepositorio.eliminarIngestasDelDia(userId, estadoActual.fechaVisualizando).onFailure { e ->
+                Log.e("CalculadoraViewModel", "Error al eliminar las ingestas del día: ${e.message}")
+            }
             macrosRepositorio.guardarMacrosDelDia(
                 MacrosDiarios(
                     id = estadoActual.macrosDiariosId,
@@ -576,7 +632,7 @@ data class EstadoCalculadora(
     val slotActivo: String? = null,
     val recetasDisponibles: List<Receta> = emptyList(),
     val cargandoRecetas: Boolean = false,
-    val ingestasDelDia: Map<String, List<Receta>> = emptyMap(),
+    val ingestasDelDia: Map<String, List<IngestaSlot>> = emptyMap(),
     // Navegación de fechas (modo historial = solo lectura)
     val fechaVisualizando: String = java.time.LocalDate.now().toString(),
     val esModoHistorial: Boolean = false,
@@ -587,11 +643,13 @@ data class EstadoCalculadora(
     val buscandoAlimento: Boolean = false,
     val sesionCerrada: Boolean = false,
     val ingestaEditando: IngestaEditando? = null,
-    val mostrandoDialogoReinicio: Boolean = false
+    val mostrandoDialogoReinicio: Boolean = false,
+    // Se activa cuando la carga falló por falta de red pero hay datos cacheados disponibles
+    val sinConexion: Boolean = false
 )
 
 data class IngestaEditando(
     val slotNombre: String,
-    val recetaOriginal: Receta,
+    val ingestaSlot: IngestaSlot,
     val cantidadTexto: String = "100"
 )

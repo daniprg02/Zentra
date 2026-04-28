@@ -11,4 +11,5 @@ sealed class Destinos(val ruta: String) {
     data object Rutinas : Destinos("rutinas")
     data object Calculadora : Destinos("calculadora")
     data object Recetas : Destinos("recetas")
+    data object NuevaReceta : Destinos("nueva_receta")
 }

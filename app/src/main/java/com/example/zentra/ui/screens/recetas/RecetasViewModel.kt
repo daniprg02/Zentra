@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.recetas
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.ZentraCacheManager
 import com.example.zentra.domain.model.Receta
 import com.example.zentra.domain.repository.IRecetasRepositorio
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,8 +12,8 @@ import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import java.util.UUID
 import javax.inject.Inject
 
 /**
@@ -20,14 +21,15 @@ import javax.inject.Inject
  *
  * Responsabilidades:
  * - Cargar y filtrar la biblioteca de recetas del usuario desde Supabase.
- * - Gestionar el formulario de creación manual de recetas.
  * - Manejar el pin (fijado) y la eliminación de recetas.
- * - Calcular las kcal automáticamente a partir de los macros introducidos.
+ * - Reaccionar a cambios externos (NuevaRecetaViewModel) a través del flujo de notificaciones
+ *   del repositorio para mantener la lista siempre actualizada sin mostrar un spinner.
  */
 @HiltViewModel
 class RecetasViewModel @Inject constructor(
     private val supabase: SupabaseClient,
-    private val recetasRepositorio: IRecetasRepositorio
+    private val recetasRepositorio: IRecetasRepositorio,
+    private val cacheManager: ZentraCacheManager
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(EstadoRecetas())
@@ -36,6 +38,7 @@ class RecetasViewModel @Inject constructor(
     init {
         Log.d("RecetasViewModel", "ViewModel inicializado. Cargando biblioteca de recetas.")
         cargarRecetas()
+        observarNotificaciones()
     }
 
     /**
@@ -53,14 +56,23 @@ class RecetasViewModel @Inject constructor(
                 val ordenadas = recetas.sortedWith(
                     compareByDescending<Receta> { it.fijada }.thenByDescending { it.creadaEn }
                 )
+                cacheManager.guardarRecetas(ordenadas)
                 Log.d("RecetasViewModel", "${ordenadas.size} recetas cargadas para el usuario.")
-                _estado.value = _estado.value.copy(cargando = false, recetas = ordenadas)
+                _estado.value = _estado.value.copy(cargando = false, recetas = ordenadas, sinConexion = false)
             } catch (e: Exception) {
                 Log.e("RecetasViewModel", "Error al cargar las recetas: ${e.message}")
-                _estado.value = _estado.value.copy(
-                    cargando = false,
-                    error = "No se pudo cargar la biblioteca. Comprueba tu conexión."
-                )
+
+                // Intentar mostrar recetas desde caché local
+                val recetasCacheadas = cacheManager.cargarRecetas()
+                if (recetasCacheadas.isNotEmpty()) {
+                    Log.d("RecetasViewModel", "Sin conexión: mostrando ${recetasCacheadas.size} recetas cacheadas.")
+                    _estado.value = _estado.value.copy(cargando = false, recetas = recetasCacheadas, sinConexion = true)
+                } else {
+                    _estado.value = _estado.value.copy(
+                        cargando = false,
+                        error = "No se pudo cargar la biblioteca. Comprueba tu conexión."
+                    )
+                }
             }
         }
     }
@@ -70,154 +82,9 @@ class RecetasViewModel @Inject constructor(
         _estado.value = _estado.value.copy(filtro = query)
     }
 
-    /** Abre el formulario de creación con todos los campos limpios. */
-    fun mostrarFormulario() {
-        _estado.value = _estado.value.copy(
-            mostrandoFormulario = true,
-            formulario = FormularioNuevaReceta()
-        )
-    }
-
-    /** Cierra el formulario descartando cualquier dato sin guardar. */
-    fun ocultarFormulario() {
-        _estado.value = _estado.value.copy(mostrandoFormulario = false)
-    }
-
-    // Actualizadores individuales de los campos del formulario
-    fun actualizarTitulo(valor: String) {
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(titulo = valor, error = null))
-    }
-
-    fun agregarIngrediente() {
-        val lista = _estado.value.formulario.ingredientes + IngredienteFormulario()
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
-    }
-
-    fun eliminarIngrediente(idx: Int) {
-        val lista = _estado.value.formulario.ingredientes.toMutableList()
-        if (lista.size > 1) lista.removeAt(idx)
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
-    }
-
-    fun actualizarUnidades(idx: Int, valor: String) {
-        val lista = _estado.value.formulario.ingredientes.toMutableList()
-        lista[idx] = lista[idx].copy(unidades = valor)
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
-    }
-
-    fun actualizarAlimento(idx: Int, valor: String) {
-        val lista = _estado.value.formulario.ingredientes.toMutableList()
-        lista[idx] = lista[idx].copy(alimento = valor)
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
-    }
-
-    fun actualizarPesoG(idx: Int, valor: String) {
-        val lista = _estado.value.formulario.ingredientes.toMutableList()
-        lista[idx] = lista[idx].copy(pesoG = valor)
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
-    }
-
-    fun usarAlimentoGuardado(alimento: AlimentoGuardado) {
-        val lista = _estado.value.formulario.ingredientes.toMutableList()
-        val idx = lista.indexOfFirst { it.alimento.isBlank() }
-        if (idx >= 0) {
-            lista[idx] = lista[idx].copy(
-                alimento = alimento.nombre,
-                unidades = alimento.unidades.ifEmpty { lista[idx].unidades },
-                pesoG = alimento.pesoG.ifEmpty { lista[idx].pesoG }
-            )
-        } else {
-            lista.add(IngredienteFormulario(alimento = alimento.nombre, unidades = alimento.unidades, pesoG = alimento.pesoG))
-        }
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(ingredientes = lista))
-    }
-
-    fun actualizarProteinas(valor: String) {
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(proteinas = valor, error = null))
-    }
-
-    fun actualizarCarbos(valor: String) {
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(carbos = valor, error = null))
-    }
-
-    fun actualizarGrasas(valor: String) {
-        _estado.value = _estado.value.copy(formulario = _estado.value.formulario.copy(grasas = valor, error = null))
-    }
-
-    /**
-     * Valida el formulario, calcula las kcal a partir de los macros y persiste la receta en Supabase.
-     * Las kcal no se introducen manualmente: se calculan siempre como P×4 + C×4 + G×9.
-     */
-    fun guardarNuevaReceta() {
-        viewModelScope.launch {
-            val form = _estado.value.formulario
-
-            if (form.titulo.isBlank()) {
-                _estado.value = _estado.value.copy(formulario = form.copy(error = "El título no puede estar vacío."))
-                return@launch
-            }
-
-            val proteinas = form.proteinas.toFloatOrNull()
-            val carbos = form.carbos.toFloatOrNull()
-            val grasas = form.grasas.toFloatOrNull()
-
-            if (proteinas == null || carbos == null || grasas == null) {
-                _estado.value = _estado.value.copy(formulario = form.copy(error = "Introduce valores numéricos válidos en los macros."))
-                return@launch
-            }
-            if (proteinas < 0f || carbos < 0f || grasas < 0f) {
-                _estado.value = _estado.value.copy(formulario = form.copy(error = "Los macros no pueden ser negativos."))
-                return@launch
-            }
-
-            _estado.value = _estado.value.copy(formulario = form.copy(guardando = true, error = null))
-
-            try {
-                val userId = supabase.auth.currentUserOrNull()?.id
-                    ?: throw Exception("No hay sesión activa.")
-
-                val kcalCalculadas = ((proteinas * 4f) + (carbos * 4f) + (grasas * 9f)).toInt()
-
-                val ingredientesTexto = form.ingredientes
-                    .filter { it.alimento.isNotBlank() }
-                    .joinToString("\n") { ing ->
-                        buildString {
-                            if (ing.unidades.isNotBlank()) append("${ing.unidades} ")
-                            append(ing.alimento.trim())
-                            if (ing.pesoG.isNotBlank()) append(" (${ing.pesoG}g)")
-                        }
-                    }
-
-                val nuevaReceta = Receta(
-                    id = UUID.randomUUID().toString(),
-                    userId = userId,
-                    titulo = form.titulo.trim(),
-                    kcalTotales = kcalCalculadas,
-                    proteinasG = proteinas,
-                    carbosG = carbos,
-                    grasasG = grasas,
-                    ingredientes = ingredientesTexto,
-                    fijada = false,
-                    creadaEn = null
-                )
-
-                recetasRepositorio.guardarReceta(nuevaReceta).getOrThrow()
-                Log.d("RecetasViewModel", "Receta '${nuevaReceta.titulo}' (${nuevaReceta.kcalTotales} kcal) guardada correctamente.")
-
-                ocultarFormulario()
-                cargarRecetas()
-            } catch (e: Exception) {
-                Log.e("RecetasViewModel", "Error al guardar la receta: ${e.message}")
-                _estado.value = _estado.value.copy(
-                    formulario = _estado.value.formulario.copy(guardando = false, error = "No se pudo guardar. Inténtalo de nuevo.")
-                )
-            }
-        }
-    }
-
     /**
      * Elimina una receta de Supabase y la borra de la lista local sin recargar toda la BD.
-     * @param receta La receta a eliminar.
+     * Si la operación falla, recarga la lista para restaurar el estado correcto.
      */
     fun eliminarReceta(receta: Receta) {
         viewModelScope.launch {
@@ -229,22 +96,19 @@ class RecetasViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Log.e("RecetasViewModel", "Error al eliminar la receta '${receta.titulo}': ${e.message}")
-                // Recargamos para restaurar el estado correcto si el swipe quedó en estado inconsistente
                 cargarRecetas()
             }
         }
     }
 
     /**
-     * Alterna el estado de fijado de una receta. Las recetas fijadas aparecen en el carrusel superior.
-     * Actualiza la lista local inmediatamente para que la UI responda sin esperar la red.
-     * @param receta La receta cuyo pin se quiere alternar.
+     * Alterna el estado de fijado de una receta.
+     * Actualiza la lista local de forma optimista y revierte en caso de error.
      */
     fun toggleFijada(receta: Receta) {
         viewModelScope.launch {
             val actualizada = receta.copy(fijada = !receta.fijada)
             try {
-                // Actualización optimista: reflejamos el cambio en la UI antes de confirmar con Supabase
                 val listaTemporal = _estado.value.recetas.map { if (it.id == receta.id) actualizada else it }
                     .sortedWith(compareByDescending<Receta> { it.fijada }.thenByDescending { it.creadaEn })
                 _estado.value = _estado.value.copy(recetas = listaTemporal)
@@ -253,39 +117,59 @@ class RecetasViewModel @Inject constructor(
                 Log.d("RecetasViewModel", "Receta '${receta.titulo}' ${if (actualizada.fijada) "fijada" else "desfijada"}.")
             } catch (e: Exception) {
                 Log.e("RecetasViewModel", "Error al actualizar el pin de '${receta.titulo}': ${e.message}")
-                // Revertimos el cambio optimista si Supabase falla
                 cargarRecetas()
+            }
+        }
+    }
+
+    /**
+     * Escucha el flujo de notificaciones del repositorio.
+     * Cuando NuevaRecetaViewModel guarda una receta, este método recarga la lista
+     * de forma silenciosa (sin spinner) para reflejar el cambio al volver a esta pantalla.
+     */
+    private fun observarNotificaciones() {
+        viewModelScope.launch {
+            recetasRepositorio.notificaciones.collect {
+                Log.d("RecetasViewModel", "Notificación recibida. Recargando lista en silencio.")
+                recargarSilencioso()
+            }
+        }
+    }
+
+    private fun recargarSilencioso() {
+        viewModelScope.launch {
+            try {
+                val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
+                val recetas = recetasRepositorio.obtenerRecetasDeUsuario(userId)
+                    .getOrDefault(_estado.value.recetas)
+                val ordenadas = recetas.sortedWith(
+                    compareByDescending<Receta> { it.fijada }.thenByDescending { it.creadaEn }
+                )
+                _estado.value = _estado.value.copy(recetas = ordenadas)
+            } catch (e: Exception) {
+                Log.e("RecetasViewModel", "Error en recarga silenciosa: ${e.message}")
             }
         }
     }
 }
 
-/**
- * Estado completo de la pantalla del Gestor de Recetas.
- */
+/** Estado de la pantalla del Gestor de Recetas. */
 data class EstadoRecetas(
     val cargando: Boolean = true,
     val error: String? = null,
     val recetas: List<Receta> = emptyList(),
     val filtro: String = "",
-    val mostrandoFormulario: Boolean = false,
-    val formulario: FormularioNuevaReceta = FormularioNuevaReceta()
+    val sinConexion: Boolean = false
 )
 
-/**
- * Un ingrediente con sus tres campos: cantidad, nombre y peso en gramos.
- * Todos como String para permitir entrada parcial libre.
- */
+/** Ingrediente con sus tres campos editables: cantidad, nombre y peso en gramos. */
 data class IngredienteFormulario(
     val unidades: String = "",
     val alimento: String = "",
     val pesoG: String = ""
 )
 
-/**
- * Estado del formulario de creación manual de recetas.
- * Los ingredientes son una lista de filas estructuradas (unidades/alimento/peso).
- */
+/** Estado del formulario de creación de una receta nueva. */
 data class FormularioNuevaReceta(
     val titulo: String = "",
     val ingredientes: List<IngredienteFormulario> = listOf(IngredienteFormulario()),
@@ -296,6 +180,7 @@ data class FormularioNuevaReceta(
     val error: String? = null
 )
 
+/** Referencia a un alimento ya usado en recetas anteriores, para sugerencias de autocompletado. */
 data class AlimentoGuardado(
     val nombre: String,
     val unidades: String = "",

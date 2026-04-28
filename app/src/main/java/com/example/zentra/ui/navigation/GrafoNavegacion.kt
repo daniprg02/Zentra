@@ -1,5 +1,8 @@
 package com.example.zentra.ui.navigation
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -22,6 +25,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.zentra.ui.screens.auth.PantallaLogin
 import com.example.zentra.ui.screens.auth.PantallaOnboarding
 import com.example.zentra.ui.screens.calculadora.PantallaCalculadora
+import com.example.zentra.ui.screens.recetas.PantallaNuevaReceta
 import com.example.zentra.ui.screens.recetas.PantallaRecetas
 import com.example.zentra.ui.screens.rutinas.PantallaRutinas
 import com.example.zentra.ui.screens.splash.PantallaSplash
@@ -29,7 +33,8 @@ import com.example.zentra.ui.screens.splash.PantallaSplash
 /**
  * Grafo de navegación principal de Zentra.
  * Arranca en el Splash, que verifica la sesión y redirige automáticamente.
- * La barra de navegación inferior solo se muestra en los tres módulos principales.
+ * La barra de navegación inferior solo se muestra en los tres módulos principales,
+ * y entra/sale con animación de deslizamiento vertical para evitar cortes bruscos.
  */
 @Composable
 fun GrafoNavegacion() {
@@ -45,7 +50,11 @@ fun GrafoNavegacion() {
 
     Scaffold(
         bottomBar = {
-            if (rutaActual in rutasPrincipales) {
+            AnimatedVisibility(
+                visible = rutaActual in rutasPrincipales,
+                enter = slideInVertically(initialOffsetY = { it }),
+                exit = slideOutVertically(targetOffsetY = { it })
+            ) {
                 BarraNavegacionInferior(navController = navController, rutaActual = rutaActual)
             }
         }
@@ -69,7 +78,7 @@ fun GrafoNavegacion() {
                         }
                     },
                     onNavegacionPrincipal = {
-                        navController.navigate(Destinos.Rutinas.ruta) {
+                        navController.navigate(Destinos.Calculadora.ruta) {
                             popUpTo(Destinos.Splash.ruta) { inclusive = true }
                         }
                     }
@@ -80,7 +89,7 @@ fun GrafoNavegacion() {
             composable(Destinos.Login.ruta) {
                 PantallaLogin(
                     onLoginConPerfil = {
-                        navController.navigate(Destinos.Rutinas.ruta) {
+                        navController.navigate(Destinos.Calculadora.ruta) {
                             popUpTo(Destinos.Login.ruta) { inclusive = true }
                         }
                     },
@@ -96,7 +105,7 @@ fun GrafoNavegacion() {
             composable(Destinos.Onboarding.ruta) {
                 PantallaOnboarding(
                     onPerfilGuardado = {
-                        navController.navigate(Destinos.Rutinas.ruta) {
+                        navController.navigate(Destinos.Calculadora.ruta) {
                             popUpTo(Destinos.Onboarding.ruta) { inclusive = true }
                         }
                     }
@@ -114,7 +123,17 @@ fun GrafoNavegacion() {
                     }
                 )
             }
-            composable(Destinos.Recetas.ruta) { PantallaRecetas() }
+            composable(Destinos.Recetas.ruta) {
+                PantallaRecetas(
+                    onNuevaReceta = { navController.navigate(Destinos.NuevaReceta.ruta) }
+                )
+            }
+            composable(Destinos.NuevaReceta.ruta) {
+                PantallaNuevaReceta(
+                    onRecetaGuardada = { navController.popBackStack() },
+                    onNavegacionAtras = { navController.popBackStack() }
+                )
+            }
         }
     }
 }
@@ -125,8 +144,8 @@ private fun BarraNavegacionInferior(
     rutaActual: String?
 ) {
     val elementos = listOf(
-        ElementoNavegacion(Destinos.Rutinas.ruta, "Rutinas", Icons.Default.FitnessCenter),
         ElementoNavegacion(Destinos.Calculadora.ruta, "Calculadora", Icons.Default.BarChart),
+        ElementoNavegacion(Destinos.Rutinas.ruta, "Rutinas", Icons.Default.FitnessCenter),
         ElementoNavegacion(Destinos.Recetas.ruta, "Recetas", Icons.Default.MenuBook)
     )
 
@@ -139,7 +158,7 @@ private fun BarraNavegacionInferior(
                 onClick = {
                     if (rutaActual != elemento.ruta) {
                         navController.navigate(elemento.ruta) {
-                            popUpTo(Destinos.Rutinas.ruta) { saveState = true }
+                            popUpTo(Destinos.Calculadora.ruta) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }

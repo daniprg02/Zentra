@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material3.AlertDialog
@@ -88,6 +90,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.zentra.domain.model.IngestaSlot
 import com.example.zentra.domain.model.NivelActividad
 import com.example.zentra.domain.model.ObjetivoFisico
 import com.example.zentra.domain.model.Receta
@@ -172,8 +175,8 @@ fun PantallaCalculadora(
                 resultadosBusqueda = estado.resultadosBusqueda,
                 buscandoAlimento = estado.buscandoAlimento,
                 onRecetaSeleccionada = viewModel::agregarRecetaASlot,
-                onEliminarIngesta = { receta ->
-                    viewModel.eliminarRecetaDeSlot(estado.slotActivo!!, receta)
+                onEliminarIngesta = { ingesta ->
+                    viewModel.eliminarRecetaDeSlot(estado.slotActivo!!, ingesta)
                 },
                 onActualizarBusqueda = viewModel::actualizarBusqueda,
                 onCerrar = viewModel::cerrarSlot
@@ -202,13 +205,13 @@ fun PantallaCalculadora(
     if (estado.ingestaEditando != null) {
         val edicion = estado.ingestaEditando!!
         val cantidadFloat = edicion.cantidadTexto.toFloatOrNull()
-        val kcalPreview = cantidadFloat?.let { ((edicion.recetaOriginal.kcalTotales * it) / 100f).toInt() }
+        val kcalPreview = cantidadFloat?.let { ((edicion.ingestaSlot.baseKcal * it) / 100f).toInt() }
 
         AlertDialog(
             onDismissRequest = viewModel::cerrarEdicionIngesta,
             title = {
                 Text(
-                    text = edicion.recetaOriginal.titulo,
+                    text = edicion.ingestaSlot.recetaTitulo,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -216,7 +219,7 @@ fun PantallaCalculadora(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "Base: ${edicion.recetaOriginal.kcalTotales} kcal / 100 g",
+                        text = "Base: ${edicion.ingestaSlot.baseKcal} kcal / 100 g",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -260,11 +263,11 @@ private fun ContenidoCalculadora(
     onObjetivoSeleccionado: (ObjetivoFisico) -> Unit,
     onNivelActividadSeleccionado: (NivelActividad) -> Unit,
     onSlotClick: (String) -> Unit,
-    onEliminarReceta: (String, Receta) -> Unit,
+    onEliminarReceta: (String, IngestaSlot) -> Unit,
     onCambiarFecha: (LocalDate) -> Unit,
     onVolverAHoy: () -> Unit,
     onLogout: () -> Unit,
-    onEditarIngesta: (String, Receta) -> Unit,
+    onEditarIngesta: (String, IngestaSlot) -> Unit,
     onPedirReinicio: () -> Unit
 ) {
     var mostrarDatePicker by remember { mutableStateOf(false) }
@@ -319,6 +322,33 @@ private fun ContenidoCalculadora(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Banner de modo sin conexión
+        if (estado.sinConexion) {
+            androidx.compose.material3.Surface(
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.WifiOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Text(
+                        text = "Sin conexión · Mostrando datos guardados",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+
         // Banner de modo historial (solo lectura)
         if (estado.esModoHistorial) {
             Surface(color = MaterialTheme.colorScheme.tertiaryContainer) {
@@ -386,28 +416,31 @@ private fun ContenidoCalculadora(
                             )
                         }
                     }
-                    Box {
-                        IconButton(onClick = { mostrarMenuUsuario = true }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Person,
-                                contentDescription = "Perfil",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = mostrarMenuUsuario,
-                            onDismissRequest = { mostrarMenuUsuario = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Cerrar sesión") },
-                                leadingIcon = {
-                                    Icon(Icons.Outlined.ExitToApp, contentDescription = null)
-                                },
-                                onClick = {
-                                    mostrarMenuUsuario = false
-                                    onLogout()
-                                }
-                            )
+                    // El menú de perfil no tiene sentido en modo historial (solo lectura)
+                    if (!estado.esModoHistorial) {
+                        Box {
+                            IconButton(onClick = { mostrarMenuUsuario = true }) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Person,
+                                    contentDescription = "Perfil",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = mostrarMenuUsuario,
+                                onDismissRequest = { mostrarMenuUsuario = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Cerrar sesión") },
+                                    leadingIcon = {
+                                        Icon(Icons.Outlined.ExitToApp, contentDescription = null)
+                                    },
+                                    onClick = {
+                                        mostrarMenuUsuario = false
+                                        onLogout()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -504,14 +537,14 @@ private fun ContenidoCalculadora(
                         icono = slot.icono,
                         ingestas = estado.ingestasDelDia[slot.nombre] ?: emptyList(),
                         onClick = { onSlotClick(slot.nombre) },
-                        onEliminarReceta = { receta -> onEliminarReceta(slot.nombre, receta) },
-                        onEditarIngesta = { receta -> onEditarIngesta(slot.nombre, receta) }
+                        onEliminarReceta = { ingesta -> onEliminarReceta(slot.nombre, ingesta) },
+                        onEditarIngesta = { ingesta -> onEditarIngesta(slot.nombre, ingesta) }
                     )
                 }
             } else {
                 item {
                     Text(
-                        text = "Las ingestas detalladas por slot no se guardan históricamente.",
+                        text = "Historial · Consulta el resumen calórico en los indicadores de arriba.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -531,14 +564,14 @@ private fun ContenidoCalculadora(
 private fun PickerRecetasParaSlot(
     nombreSlot: String,
     recetas: List<Receta>,
-    ingestasActuales: List<Receta>,
+    ingestasActuales: List<IngestaSlot>,
     cargando: Boolean,
     busquedaTexto: String,
     resultadosLocales: List<Receta>,
     resultadosBusqueda: List<Receta>,
     buscandoAlimento: Boolean,
     onRecetaSeleccionada: (Receta) -> Unit,
-    onEliminarIngesta: (Receta) -> Unit,
+    onEliminarIngesta: (IngestaSlot) -> Unit,
     onActualizarBusqueda: (String) -> Unit,
     onCerrar: () -> Unit
 ) {
@@ -688,22 +721,22 @@ private fun PickerRecetasParaSlot(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ingestasActuales.forEach { receta ->
+                    ingestasActuales.forEach { ingesta ->
                         SuggestionChip(
                             onClick = {},
                             label = {
                                 Text(
-                                    text = "${receta.titulo} · ${receta.kcalTotales} kcal",
+                                    text = "${ingesta.recetaTitulo} · ${ingesta.gramos.toInt()}g · ${ingesta.kcalActual} kcal",
                                     style = MaterialTheme.typography.labelSmall
                                 )
                             },
                             icon = {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
-                                    contentDescription = "Eliminar ${receta.titulo}",
+                                    contentDescription = "Eliminar ${ingesta.recetaTitulo}",
                                     modifier = Modifier
                                         .size(16.dp)
-                                        .clickable { onEliminarIngesta(receta) }
+                                        .clickable { onEliminarIngesta(ingesta) }
                                 )
                             }
                         )
@@ -818,12 +851,12 @@ private fun ItemRecetaPicker(receta: Receta, onClick: () -> Unit) {
 private fun TarjetaSlotComida(
     nombre: String,
     icono: ImageVector,
-    ingestas: List<Receta>,
+    ingestas: List<IngestaSlot>,
     onClick: () -> Unit,
-    onEliminarReceta: (Receta) -> Unit,
-    onEditarIngesta: (Receta) -> Unit
+    onEliminarReceta: (IngestaSlot) -> Unit,
+    onEditarIngesta: (IngestaSlot) -> Unit
 ) {
-    val kcalSlot = ingestas.sumOf { it.kcalTotales }
+    val kcalSlot = ingestas.sumOf { it.kcalActual }
 
     Card(
         modifier = Modifier
@@ -896,12 +929,12 @@ private fun TarjetaSlotComida(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    ingestas.forEach { receta ->
+                    ingestas.forEach { ingesta ->
                         SuggestionChip(
-                            onClick = { onEditarIngesta(receta) },
+                            onClick = { onEditarIngesta(ingesta) },
                             label = {
                                 Text(
-                                    text = receta.titulo,
+                                    text = "${ingesta.recetaTitulo} · ${ingesta.gramos.toInt()}g",
                                     style = MaterialTheme.typography.labelSmall,
                                     maxLines = 1
                                 )
@@ -909,10 +942,10 @@ private fun TarjetaSlotComida(
                             icon = {
                                 Icon(
                                     imageVector = Icons.Outlined.Close,
-                                    contentDescription = "Eliminar ${receta.titulo}",
+                                    contentDescription = "Eliminar ${ingesta.recetaTitulo}",
                                     modifier = Modifier
                                         .size(14.dp)
-                                        .clickable { onEliminarReceta(receta) }
+                                        .clickable { onEliminarReceta(ingesta) }
                                 )
                             }
                         )
