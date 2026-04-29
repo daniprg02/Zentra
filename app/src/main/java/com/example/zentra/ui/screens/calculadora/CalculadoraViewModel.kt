@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.calculadora
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.MonitorConectividad
 import com.example.zentra.data.local.ZentraCacheManager
 import com.example.zentra.data.local.buscarEnMasterlist
 import com.example.zentra.data.remote.api.OpenFoodFactsService
@@ -46,7 +47,8 @@ class CalculadoraViewModel @Inject constructor(
     private val macrosRepositorio: IMacrosRepositorio,
     private val recetasRepositorio: IRecetasRepositorio,
     private val foodService: OpenFoodFactsService,
-    private val cacheManager: ZentraCacheManager
+    private val cacheManager: ZentraCacheManager,
+    private val monitorConectividad: MonitorConectividad
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(EstadoCalculadora())
@@ -58,6 +60,7 @@ class CalculadoraViewModel @Inject constructor(
         Log.d("CalculadoraViewModel", "ViewModel inicializado. Cargando datos nutricionales del día.")
         cargarDatosDelDia()
         observarCambiosEnRecetas()
+        observarConectividad()
     }
 
     /**
@@ -140,9 +143,10 @@ class CalculadoraViewModel @Inject constructor(
                 Log.e("CalculadoraViewModel", "Error al cargar los datos del día: ${e.message}")
 
                 // Intentar mostrar los objetivos desde el perfil cacheado localmente
+                val sinRed = !monitorConectividad.hayConexion()
                 val perfilCacheado = cacheManager.cargarPerfil()
                 if (perfilCacheado != null) {
-                    Log.d("CalculadoraViewModel", "Sin conexión: usando perfil cacheado de '${perfilCacheado.apodo}'.")
+                    Log.d("CalculadoraViewModel", "Usando perfil cacheado de '${perfilCacheado.apodo}'. Sin red: $sinRed")
                     val objetivos = calcularObjetivosNutricionales(
                         perfil = perfilCacheado,
                         nivel = _estado.value.nivelActividad,
@@ -160,7 +164,7 @@ class CalculadoraViewModel @Inject constructor(
                         consumidoCarbosG = 0f,
                         consumidoGrasasG = 0f,
                         ingestasDelDia = emptyMap(),
-                        sinConexion = true
+                        sinConexion = sinRed  // solo banner si el dispositivo realmente no tiene red
                     )
                 } else {
                     _estado.value = _estado.value.copy(
@@ -550,6 +554,18 @@ class CalculadoraViewModel @Inject constructor(
                 } else {
                     Log.d("CalculadoraViewModel", "Recetas modificadas. Caché de picker invalidado.")
                     _estado.value = _estado.value.copy(recetasDisponibles = emptyList())
+                }
+            }
+        }
+    }
+
+    /** Recarga automáticamente cuando la conexión se restaura estando en modo offline. */
+    private fun observarConectividad() {
+        viewModelScope.launch {
+            monitorConectividad.observarConectividad().collect { hayConexion ->
+                if (hayConexion && _estado.value.sinConexion) {
+                    Log.d("CalculadoraViewModel", "Conexión restaurada. Recargando datos del día.")
+                    cargarDatosDelDia()
                 }
             }
         }

@@ -3,6 +3,7 @@ package com.example.zentra.ui.screens.recetas
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.zentra.data.local.MonitorConectividad
 import com.example.zentra.data.local.ZentraCacheManager
 import com.example.zentra.domain.model.Receta
 import com.example.zentra.domain.repository.IRecetasRepositorio
@@ -29,7 +30,8 @@ import javax.inject.Inject
 class RecetasViewModel @Inject constructor(
     private val supabase: SupabaseClient,
     private val recetasRepositorio: IRecetasRepositorio,
-    private val cacheManager: ZentraCacheManager
+    private val cacheManager: ZentraCacheManager,
+    private val monitorConectividad: MonitorConectividad
 ) : ViewModel() {
 
     private val _estado = MutableStateFlow(EstadoRecetas())
@@ -39,6 +41,7 @@ class RecetasViewModel @Inject constructor(
         Log.d("RecetasViewModel", "ViewModel inicializado. Cargando biblioteca de recetas.")
         cargarRecetas()
         observarNotificaciones()
+        observarConectividad()
     }
 
     /**
@@ -62,11 +65,12 @@ class RecetasViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e("RecetasViewModel", "Error al cargar las recetas: ${e.message}")
 
-                // Intentar mostrar recetas desde caché local
+                // sinConexion solo es true si el dispositivo no tiene red real
+                val sinRed = !monitorConectividad.hayConexion()
                 val recetasCacheadas = cacheManager.cargarRecetas()
                 if (recetasCacheadas.isNotEmpty()) {
-                    Log.d("RecetasViewModel", "Sin conexión: mostrando ${recetasCacheadas.size} recetas cacheadas.")
-                    _estado.value = _estado.value.copy(cargando = false, recetas = recetasCacheadas, sinConexion = true)
+                    Log.d("RecetasViewModel", "Usando ${recetasCacheadas.size} recetas cacheadas. Sin red: $sinRed")
+                    _estado.value = _estado.value.copy(cargando = false, recetas = recetasCacheadas, sinConexion = sinRed)
                 } else {
                     _estado.value = _estado.value.copy(
                         cargando = false,
@@ -132,6 +136,18 @@ class RecetasViewModel @Inject constructor(
             recetasRepositorio.notificaciones.collect {
                 Log.d("RecetasViewModel", "Notificación recibida. Recargando lista en silencio.")
                 recargarSilencioso()
+            }
+        }
+    }
+
+    /** Recarga automáticamente cuando la conexión se restaura estando en modo offline. */
+    private fun observarConectividad() {
+        viewModelScope.launch {
+            monitorConectividad.observarConectividad().collect { hayConexion ->
+                if (hayConexion && _estado.value.sinConexion) {
+                    Log.d("RecetasViewModel", "Conexión restaurada. Recargando recetas.")
+                    cargarRecetas()
+                }
             }
         }
     }

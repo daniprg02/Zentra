@@ -1,6 +1,7 @@
 package com.example.zentra.data.local
 
 import com.example.zentra.domain.model.Receta
+import java.text.Normalizer
 import java.util.UUID
 
 /**
@@ -363,13 +364,18 @@ val MASTERLIST_ALIMENTOS: List<AlimentoLocal> = listOf(
 
 )
 
-/** Busca en la masterlist local por nombre (insensible a mayúsculas/acentos). */
+/** Elimina tildes y normaliza a minúsculas para comparaciones insensibles a acentos. */
+private fun normalizar(texto: String): String =
+    Normalizer.normalize(texto.lowercase(), Normalizer.Form.NFD)
+        .replace(Regex("\\p{InCombiningDiacriticalMarks}"), "")
+
+/** Busca en la masterlist local por nombre (insensible a mayúsculas y tildes). */
 fun buscarEnMasterlist(termino: String, limite: Int = 8): List<Receta> {
     if (termino.isBlank()) return emptyList()
-    val t = termino.trim().lowercase()
+    val t = normalizar(termino.trim())
     return MASTERLIST_ALIMENTOS
-        .filter { it.nombre.lowercase().contains(t) }
-        .sortedBy { it.nombre.lowercase().indexOf(t) }
+        .filter { normalizar(it.nombre).contains(t) }
+        .sortedBy { normalizar(it.nombre).indexOf(t) }
         .take(limite)
         .map { it.aReceta() }
 }

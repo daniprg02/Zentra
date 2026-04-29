@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 
@@ -109,9 +110,9 @@ class NuevaRecetaViewModel @Inject constructor(
             nuevaG = gActual + receta.grasasG
         }
 
-        // Formatea sin decimales innecesarios: 30.0 → "30", 30.5 → "30.5"
+        // Locale.ROOT garantiza punto decimal en cualquier idioma del dispositivo (evita "30,")
         val fmt: (Float) -> String = { v ->
-            if (v == 0f) "" else "%.1f".format(v).trimEnd('0').trimEnd('.')
+            if (v == 0f) "" else String.format(Locale.ROOT, "%.1f", v).trimEnd('0').trimEnd('.')
         }
 
         _estado.value = estado.copy(

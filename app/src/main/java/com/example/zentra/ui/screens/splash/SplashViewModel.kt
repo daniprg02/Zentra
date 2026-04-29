@@ -61,21 +61,31 @@ class SplashViewModel @Inject constructor(
                 Log.d("SplashViewModel", "Sesión activa: ${usuario.id}. Verificando perfil...")
 
                 // Comprobar perfil online; si falla (sin red), usar caché
+                var errorDeRed = false
                 val tienePerfil = try {
                     val resultado = perfilRepositorio.obtenerPerfil(usuario.id).isSuccess
                     Log.d("SplashViewModel", "Verificación online del perfil: $resultado")
                     resultado
                 } catch (e: Exception) {
                     Log.w("SplashViewModel", "No se pudo verificar perfil en red. Comprobando caché.")
+                    errorDeRed = true
                     cacheManager.cargarPerfil() != null
                 }
 
-                _destino.value = if (tienePerfil) {
-                    Log.d("SplashViewModel", "Perfil encontrado. Redirigiendo al menú principal.")
-                    DestinoPantalla.Principal
-                } else {
-                    Log.d("SplashViewModel", "Sin perfil completado. Redirigiendo al Onboarding.")
-                    DestinoPantalla.Onboarding
+                _destino.value = when {
+                    tienePerfil -> {
+                        Log.d("SplashViewModel", "Perfil encontrado. Redirigiendo al menú principal.")
+                        DestinoPantalla.Principal
+                    }
+                    errorDeRed -> {
+                        // Error de red y sin caché: no redirigir al Onboarding para evitar re-registro accidental
+                        Log.d("SplashViewModel", "Error de red sin caché. Redirigiendo al Login.")
+                        DestinoPantalla.Login
+                    }
+                    else -> {
+                        Log.d("SplashViewModel", "Sin perfil completado. Redirigiendo al Onboarding.")
+                        DestinoPantalla.Onboarding
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("SplashViewModel", "Error al verificar la sesión: ${e.message}")

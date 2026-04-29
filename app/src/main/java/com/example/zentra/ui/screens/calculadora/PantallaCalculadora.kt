@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -146,7 +147,8 @@ fun PantallaCalculadora(
             onVolverAHoy = viewModel::volverAHoy,
             onLogout = viewModel::cerrarSesion,
             onEditarIngesta = viewModel::abrirEdicionIngesta,
-            onPedirReinicio = viewModel::pedirReinicio
+            onPedirReinicio = viewModel::pedirReinicio,
+            onReintentar = viewModel::cargarDatosDelDia
         )
     }
 
@@ -268,7 +270,8 @@ private fun ContenidoCalculadora(
     onVolverAHoy: () -> Unit,
     onLogout: () -> Unit,
     onEditarIngesta: (String, IngestaSlot) -> Unit,
-    onPedirReinicio: () -> Unit
+    onPedirReinicio: () -> Unit,
+    onReintentar: () -> Unit
 ) {
     var mostrarDatePicker by remember { mutableStateOf(false) }
 
@@ -343,8 +346,20 @@ private fun ContenidoCalculadora(
                     Text(
                         text = "Sin conexión · Mostrando datos guardados",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f)
                     )
+                    IconButton(
+                        onClick = onReintentar,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Refresh,
+                            contentDescription = "Reintentar conexión",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
                 }
             }
         }
