@@ -4,6 +4,8 @@
 
     <!-- Permiso de red para Supabase y la API nutricional externa -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Necesario para consultar el estado real de conectividad via ConnectivityManager -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:name=".ZentraApp"
