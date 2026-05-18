@@ -281,24 +281,28 @@ class RutinasViewModel @Inject constructor(
 
     /**
      * Cambia el grupo muscular de un ejercicio y genera uno nuevo de ese grupo con IA.
-     * No permite seleccionar grupos ya presentes en ese día (evita duplicados).
-     * El usuario puede repetir la acción hasta encontrar un ejercicio de su gusto.
+     * Permite cualquier grupo destino; la unicidad se garantiza a nivel de ejercicio (id),
+     * no de grupo, por lo que el mismo día puede tener varios ejercicios del mismo músculo.
      */
     fun cambiarGrupoMuscularEjercicio(nuevoGrupo: String) {
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
         val edicion = actual.ejercicioEditando ?: return
         viewModelScope.launch {
+            // Cerramos el diálogo y activamos el spinner antes de la llamada a red.
             _estado.value = actual.copy(
                 sustitucionEnCurso = edicion.diaNumero to edicion.ejercicioIdx,
                 ejercicioEditando = null
             )
             try {
-                val dia = actual.dias.find { it.diaNumero == edicion.diaNumero } ?: run {
-                    _estado.value = actual.copy(sustitucionEnCurso = null); return@launch
+                // A partir de aquí leemos el estado actual para no sobreescribir ejercicioEditando = null.
+                val estadoVivo = _estado.value as? EstadoRutinas.RutinaActiva ?: return@launch
+                val dia = estadoVivo.dias.find { it.diaNumero == edicion.diaNumero } ?: run {
+                    _estado.value = estadoVivo.copy(sustitucionEnCurso = null); return@launch
                 }
                 val ejercicioActual = dia.ejercicios.getOrNull(edicion.ejercicioIdx) ?: run {
-                    _estado.value = actual.copy(sustitucionEnCurso = null); return@launch
+                    _estado.value = estadoVivo.copy(sustitucionEnCurso = null); return@launch
                 }
+                // Excluimos únicamente los ejercicios ya presentes en el día (por id), no por grupo.
                 val idsEnDia = dia.ejercicios.map { it.ejercicioId }.toSet()
 
                 val todos = rutinasRepositorio.obtenerEjercicios(
@@ -312,7 +316,7 @@ class RutinasViewModel @Inject constructor(
 
                 if (candidatos.isEmpty()) {
                     Log.d("RutinasViewModel", "Sin candidatos para el grupo '$nuevoGrupo'. Sin cambios.")
-                    _estado.value = actual.copy(sustitucionEnCurso = null)
+                    _estado.value = estadoVivo.copy(sustitucionEnCurso = null)
                     return@launch
                 }
 
@@ -332,12 +336,13 @@ class RutinasViewModel @Inject constructor(
                 )
                 val diaActualizado = dia.copy(ejercicios = nuevosEjercicios)
                 rutinasRepositorio.actualizarDiaRutina(diaActualizado).getOrThrow()
-                val nuevosDias = actual.dias.map { if (it.diaNumero == edicion.diaNumero) diaActualizado else it }
+                val nuevosDias = estadoVivo.dias.map { if (it.diaNumero == edicion.diaNumero) diaActualizado else it }
                 Log.d("RutinasViewModel", "Grupo cambiado: '${ejercicioActual.grupoMuscular}' → '$nuevoGrupo'. Ejercicio: '${elegido.nombre}'.")
-                _estado.value = actual.copy(dias = nuevosDias, sustitucionEnCurso = null)
+                _estado.value = estadoVivo.copy(dias = nuevosDias, sustitucionEnCurso = null)
             } catch (e: Exception) {
                 Log.e("RutinasViewModel", "Error al cambiar grupo muscular: ${e.message}")
-                _estado.value = actual.copy(sustitucionEnCurso = null)
+                val estadoVivo = _estado.value as? EstadoRutinas.RutinaActiva ?: return@launch
+                _estado.value = estadoVivo.copy(sustitucionEnCurso = null)
             }
         }
     }

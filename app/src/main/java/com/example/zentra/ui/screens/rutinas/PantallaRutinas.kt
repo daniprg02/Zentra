@@ -1081,9 +1081,8 @@ private fun DialogoEditarEjercicio(
     var mostraBurbujas by remember(edicion) { mutableStateOf(false) }
 
     val colorGrupoActual = COLORES_MUSCULARES[edicion.grupoMuscular] ?: MaterialTheme.colorScheme.primary
-    val gruposDisponibles = TODOS_LOS_MUSCULOS.filter {
-        it != edicion.grupoMuscular && it !in edicion.gruposOcupadosEnDia
-    }
+    // Permitimos cualquier grupo distinto al actual; la unicidad se controla a nivel de ejercicio en el ViewModel.
+    val gruposDisponibles = TODOS_LOS_MUSCULOS.filter { it != edicion.grupoMuscular }
 
     AlertDialog(
         onDismissRequest = onCancelar,
