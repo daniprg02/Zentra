@@ -9,6 +9,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -156,7 +158,8 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             sustitucionEnCurso = s.sustitucionEnCurso,
             sinConexion = s.sinConexion,
             esRutinaBasica = s.esRutinaBasica,
-            onPedirNuevaRutina = viewModel::pedirNuevaRutina,
+            onPedirNuevaRutinaIA = viewModel::pedirNuevaRutinaIA,
+            onPedirNuevaRutinaLocal = viewModel::pedirNuevaRutinaLocal,
             onCancelarNuevaRutina = viewModel::cancelarNuevaRutina,
             onConfirmarNuevaRutina = viewModel::confirmarNuevaRutina,
             onActivarRutina = viewModel::activarRutina,
@@ -662,7 +665,8 @@ private fun PantallaRutinaActiva(
     sustitucionEnCurso: Pair<Int, Int>?,
     sinConexion: Boolean,
     esRutinaBasica: Boolean,
-    onPedirNuevaRutina: () -> Unit,
+    onPedirNuevaRutinaIA: () -> Unit,
+    onPedirNuevaRutinaLocal: () -> Unit,
     onCancelarNuevaRutina: () -> Unit,
     onConfirmarNuevaRutina: () -> Unit,
     onActivarRutina: (RutinaUsuario) -> Unit,
@@ -676,6 +680,12 @@ private fun PantallaRutinaActiva(
     onCambiarGrupoMuscular: (String) -> Unit
 ) {
     val expandidos = remember { mutableStateMapOf<Int, Boolean>() }
+    var fabExpandido by remember { mutableStateOf(false) }
+    val rotacionFab by animateFloatAsState(
+        targetValue = if (fabExpandido) 180f else 0f,
+        animationSpec = tween(200),
+        label = "rotacion_fab_nueva_rutina"
+    )
 
     val musculosFrecuencia = remember(dias) {
         dias.flatMap { dia -> dia.ejercicios.map { it.grupoMuscular } }
@@ -713,39 +723,124 @@ private fun PantallaRutinaActiva(
 
     Scaffold(
         floatingActionButton = {
-            // FAB degradado con identidad de IA
-            Box(
-                modifier = Modifier
-                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(50))
-                    .clip(RoundedCornerShape(50))
-                    .background(
-                        Brush.horizontalGradient(listOf(Color(0xFF7B2FBE), Color(0xFF2563EB)))
-                    )
-                    .clickable(onClick = onPedirNuevaRutina)
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Sub-FABs: visibles cuando el FAB principal está expandido
+                AnimatedVisibility(
+                    visible = fabExpandido,
+                    enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(200)) + fadeIn(tween(150)),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(200)) + fadeOut(tween(150))
                 ) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Column(verticalArrangement = Arrangement.Center) {
-                        Text(
-                            "IA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontWeight = FontWeight.SemiBold
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Sub-FAB plantilla local (colores de la app)
+                        Box(
+                            modifier = Modifier
+                                .shadow(elevation = 4.dp, shape = RoundedCornerShape(50))
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                .clickable {
+                                    fabExpandido = false
+                                    onPedirNuevaRutinaLocal()
+                                }
+                                .padding(horizontal = 18.dp, vertical = 12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.FitnessCenter,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    "Plantilla local",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        // Sub-FAB IA (diseño original conservado)
+                        Box(
+                            modifier = Modifier
+                                .shadow(elevation = 6.dp, shape = RoundedCornerShape(50))
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    Brush.horizontalGradient(listOf(Color(0xFF7B2FBE), Color(0xFF2563EB)))
+                                )
+                                .clickable {
+                                    fabExpandido = false
+                                    onPedirNuevaRutinaIA()
+                                }
+                                .padding(horizontal = 20.dp, vertical = 14.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Column(verticalArrangement = Arrangement.Center) {
+                                    Text(
+                                        "IA",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        "Rutina con IA",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // FAB principal: "Nueva Rutina" — expande/colapsa los sub-FABs
+                Box(
+                    modifier = Modifier
+                        .shadow(elevation = 6.dp, shape = RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { fabExpandido = !fabExpandido }
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.FitnessCenter,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
                             "Nueva Rutina",
                             style = MaterialTheme.typography.labelLarge,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             fontWeight = FontWeight.Bold
+                        )
+                        Icon(
+                            Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp).rotate(rotacionFab)
                         )
                     }
                 }
@@ -885,6 +980,24 @@ private fun BannerRutinaBasica() {
 }
 
 @Composable
+private fun ChipTipoRutina(esIA: Boolean) {
+    val color = if (esIA) Color(0xFF7B2FBE) else MaterialTheme.colorScheme.secondary
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, color)
+    ) {
+        Text(
+            text = if (esIA) "IA" else "Local",
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
 private fun TarjetaRutinaHistorial(
     rutina: RutinaUsuario,
     esActiva: Boolean,
@@ -910,7 +1023,15 @@ private fun TarjetaRutinaHistorial(
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Plan de ${rutina.diasSemana} días", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Plan de ${rutina.diasSemana} días",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    ChipTipoRutina(esIA = rutina.generadaConIA)
+                }
                 Text(rutina.objetivo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!esActiva) {
@@ -1104,12 +1225,16 @@ private fun CabeceraPlan(cabecera: RutinaUsuario) {
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
-                Text(
-                    "Plan activo · ${cabecera.diasSemana} días",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Plan activo · ${cabecera.diasSemana} días",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    ChipTipoRutina(esIA = cabecera.generadaConIA)
+                }
                 Text(
                     "Objetivo: ${cabecera.objetivo}",
                     style = MaterialTheme.typography.bodySmall,

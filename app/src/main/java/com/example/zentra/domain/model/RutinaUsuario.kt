@@ -9,6 +9,7 @@ package com.example.zentra.domain.model
  * @param objetivo "Déficit", "Mantenimiento" o "Superávit". Determina el ajuste calórico del TDEE.
  * @param diasSemana Número de días de entrenamiento semanales configurados.
  * @param activa Si es true, esta rutina es el plan vigente del usuario.
+ * @param generadaConIA Si es true, fue creada mediante Gemini; false indica plantilla local.
  */
 data class RutinaUsuario(
     val id: String,
@@ -16,5 +17,6 @@ data class RutinaUsuario(
     val objetivo: String,
     val diasSemana: Int,
     val activa: Boolean,
-    val creadaEn: String? = null
+    val creadaEn: String? = null,
+    val generadaConIA: Boolean = true
 )

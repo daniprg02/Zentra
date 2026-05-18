@@ -82,7 +82,13 @@ class RutinasViewModel @Inject constructor(
                     val (cabecera, dias) = activa
                     cacheManager.guardarRutinaActiva(cabecera, dias)
                     Log.d("RutinasViewModel", "Rutina activa: ${dias.size} días. Total guardadas: ${todas.size}.")
-                    EstadoRutinas.RutinaActiva(cabecera = cabecera, dias = dias, todasLasRutinas = todas, sexo = sexoUsuario)
+                    EstadoRutinas.RutinaActiva(
+                        cabecera = cabecera,
+                        dias = dias,
+                        todasLasRutinas = todas,
+                        sexo = sexoUsuario,
+                        esRutinaBasica = !cabecera.generadaConIA
+                    )
                 } else {
                     Log.d("RutinasViewModel", "Sin rutina activa. Guardadas: ${todas.size}.")
                     EstadoRutinas.SinRutina(todasLasRutinas = todas)
@@ -141,9 +147,16 @@ class RutinasViewModel @Inject constructor(
 
     // ─── Gestión de la rutina activa ──────────────────────────────────────────
 
-    fun pedirNuevaRutina() {
+    fun pedirNuevaRutinaIA() {
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
-        _estado.value = actual.copy(mostrandoDialogoNueva = true)
+        _estado.value = actual.copy(mostrandoDialogoNueva = true, nuevaRutinaConIA = true)
+        Log.d("RutinasViewModel", "Solicitud de nueva rutina con IA.")
+    }
+
+    fun pedirNuevaRutinaLocal() {
+        val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
+        _estado.value = actual.copy(mostrandoDialogoNueva = true, nuevaRutinaConIA = false)
+        Log.d("RutinasViewModel", "Solicitud de nueva plantilla local.")
     }
 
     fun cancelarNuevaRutina() {
@@ -152,7 +165,8 @@ class RutinasViewModel @Inject constructor(
     }
 
     fun confirmarNuevaRutina() {
-        iniciarCuestionario()
+        val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
+        if (actual.nuevaRutinaConIA) iniciarCuestionario() else iniciarCuestionarioLocal()
     }
 
     // ─── Edición de ejercicios ─────────────────────────────────────────────────
@@ -455,7 +469,8 @@ class RutinasViewModel @Inject constructor(
                     objetivo = datos.objetivo,
                     diasSemana = datos.diasSemana,
                     activa = true,
-                    creadaEn = null
+                    creadaEn = null,
+                    generadaConIA = datos.generarConIA
                 )
 
                 rutinasRepositorio.desactivarRutinaActiva(userId)
@@ -623,6 +638,7 @@ sealed class EstadoRutinas {
         val todasLasRutinas: List<RutinaUsuario> = emptyList(),
         val sexo: String = "Masculino",
         val mostrandoDialogoNueva: Boolean = false,
+        val nuevaRutinaConIA: Boolean = true,
         val rutinaParaEliminar: RutinaUsuario? = null,
         val ejercicioEditando: EjercicioEditando? = null,
         val sustitucionEnCurso: Pair<Int, Int>? = null,

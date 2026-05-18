@@ -15,7 +15,8 @@ data class RutinaUsuarioDto(
     val objetivo: String = "",
     @SerialName("dias_semana") val diasSemana: Int = 0,
     val activa: Boolean = true,
-    @SerialName("creada_en") val creadaEn: String? = null
+    @SerialName("creada_en") val creadaEn: String? = null,
+    @SerialName("generada_con_ia") val generadaConIA: Boolean = true
 ) {
     fun asDominio() = RutinaUsuario(
         id = id,
@@ -23,7 +24,8 @@ data class RutinaUsuarioDto(
         objetivo = objetivo,
         diasSemana = diasSemana,
         activa = activa,
-        creadaEn = creadaEn
+        creadaEn = creadaEn,
+        generadaConIA = generadaConIA
     )
 }
 
@@ -33,5 +35,6 @@ fun RutinaUsuario.asDto() = RutinaUsuarioDto(
     objetivo = objetivo,
     diasSemana = diasSemana,
     activa = activa,
-    creadaEn = creadaEn
+    creadaEn = creadaEn,
+    generadaConIA = generadaConIA
 )
