@@ -169,8 +169,7 @@ fun PantallaRutinas(viewModel: RutinasViewModel = hiltViewModel()) {
             onIniciarEdicion = viewModel::iniciarEdicionEjercicio,
             onCancelarEdicion = viewModel::cancelarEdicionEjercicio,
             onGuardarEdicion = viewModel::guardarEdicionEjercicio,
-            onSustituirConIA = viewModel::sustituirEjercicioConIA,
-            onCambiarGrupoMuscular = viewModel::cambiarGrupoMuscularEjercicio
+            onSustituirConIA = viewModel::sustituirEjercicioConIA
         )
 
         is EstadoRutinas.Error -> PantallaError(
@@ -675,9 +674,8 @@ private fun PantallaRutinaActiva(
     onConfirmarEliminar: () -> Unit,
     onIniciarEdicion: (diaNumero: Int, ejercicioIdx: Int) -> Unit,
     onCancelarEdicion: () -> Unit,
-    onGuardarEdicion: (series: Int, reps: String) -> Unit,
-    onSustituirConIA: (diaNumero: Int, ejercicioIdx: Int) -> Unit,
-    onCambiarGrupoMuscular: (String) -> Unit
+    onGuardarEdicion: (series: Int, reps: String, grupo: String) -> Unit,
+    onSustituirConIA: (diaNumero: Int, ejercicioIdx: Int) -> Unit
 ) {
     val expandidos = remember { mutableStateMapOf<Int, Boolean>() }
     var fabExpandido by remember { mutableStateOf(false) }
@@ -715,8 +713,7 @@ private fun PantallaRutinaActiva(
     DialogoEditarEjercicio(
         edicion = ejercicioEditando,
         onCancelar = onCancelarEdicion,
-        onGuardar = onGuardarEdicion,
-        onCambiarGrupoMuscular = onCambiarGrupoMuscular
+        onGuardar = onGuardarEdicion
     )
 
     val rutinasAnteriores = todasLasRutinas.filter { it.id != cabecera.id }
@@ -1064,25 +1061,25 @@ private fun DialogoEliminarRutina(rutina: RutinaUsuario?, onCancelar: () -> Unit
 
 /**
  * Diálogo para editar series, repeticiones y grupo muscular de un ejercicio.
- * El botón de intercambio despliega burbujas coloreadas de grupos disponibles
- * (excluye el grupo actual y los ya presentes en ese día).
+ * El cambio de grupo es local al diálogo: se aplica junto con el resto al pulsar Guardar.
+ * Si el grupo cambió, el ViewModel busca un ejercicio adecuado antes de persistir.
  */
 @Composable
 private fun DialogoEditarEjercicio(
     edicion: EjercicioEditando?,
     onCancelar: () -> Unit,
-    onGuardar: (series: Int, reps: String) -> Unit,
-    onCambiarGrupoMuscular: (String) -> Unit
+    onGuardar: (series: Int, reps: String, grupo: String) -> Unit
 ) {
     if (edicion == null) return
 
     var seriesLocal by remember(edicion) { mutableStateOf(edicion.series) }
     var repsLocal by remember(edicion) { mutableStateOf(edicion.repeticiones) }
+    // Estado local del grupo: se actualiza al tocar una burbuja sin llamar al ViewModel todavía.
+    var grupoLocal by remember(edicion) { mutableStateOf(edicion.grupoMuscular) }
     var mostraBurbujas by remember(edicion) { mutableStateOf(false) }
 
-    val colorGrupoActual = COLORES_MUSCULARES[edicion.grupoMuscular] ?: MaterialTheme.colorScheme.primary
-    // Permitimos cualquier grupo distinto al actual; la unicidad se controla a nivel de ejercicio en el ViewModel.
-    val gruposDisponibles = TODOS_LOS_MUSCULOS.filter { it != edicion.grupoMuscular }
+    val colorGrupoActual = COLORES_MUSCULARES[grupoLocal] ?: MaterialTheme.colorScheme.primary
+    val gruposDisponibles = TODOS_LOS_MUSCULOS.filter { it != grupoLocal }
 
     AlertDialog(
         onDismissRequest = onCancelar,
@@ -1096,7 +1093,7 @@ private fun DialogoEditarEjercicio(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                // Burbuja del grupo muscular actual + icono de cambio
+                // Burbuja del grupo muscular seleccionado + icono para desplegar el selector
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         shape = RoundedCornerShape(50),
@@ -1104,7 +1101,7 @@ private fun DialogoEditarEjercicio(
                         border = BorderStroke(1.dp, colorGrupoActual)
                     ) {
                         Text(
-                            edicion.grupoMuscular,
+                            grupoLocal,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = colorGrupoActual,
@@ -1128,7 +1125,7 @@ private fun DialogoEditarEjercicio(
                     }
                 }
 
-                // Grid colapsable de grupos disponibles para cambiar
+                // Grid colapsable de grupos; al tocar uno se actualiza la burbuja sin cerrar el diálogo.
                 AnimatedVisibility(visible = mostraBurbujas) {
                     Column(modifier = Modifier.padding(top = 10.dp)) {
                         Text(
@@ -1147,7 +1144,10 @@ private fun DialogoEditarEjercicio(
                                     Surface(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clickable { onCambiarGrupoMuscular(grupo) },
+                                            .clickable {
+                                                grupoLocal = grupo
+                                                mostraBurbujas = false
+                                            },
                                         shape = RoundedCornerShape(50),
                                         color = colorGrupo.copy(alpha = 0.12f),
                                         border = BorderStroke(1.dp, colorGrupo)
@@ -1203,7 +1203,7 @@ private fun DialogoEditarEjercicio(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onGuardar(seriesLocal, repsLocal) }) { Text("Guardar") }
+            TextButton(onClick = { onGuardar(seriesLocal, repsLocal, grupoLocal) }) { Text("Guardar") }
         },
         dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
     )

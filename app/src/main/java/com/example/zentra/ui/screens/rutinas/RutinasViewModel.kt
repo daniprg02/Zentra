@@ -198,25 +198,92 @@ class RutinasViewModel @Inject constructor(
         _estado.value = actual.copy(ejercicioEditando = null)
     }
 
-    fun guardarEdicionEjercicio(series: Int, repeticiones: String) {
+    /**
+     * Guarda los cambios del diálogo de edición.
+     * Si el grupo muscular cambió respecto al original, busca un ejercicio nuevo de ese grupo
+     * (Gemini con fallback local) antes de persistir. Si no cambió, actualiza solo series/reps.
+     *
+     * @param nuevoGrupo Grupo muscular seleccionado en el diálogo (puede ser igual al original).
+     */
+    fun guardarEdicionEjercicio(series: Int, repeticiones: String, nuevoGrupo: String) {
         val actual = _estado.value as? EstadoRutinas.RutinaActiva ?: return
         val edicion = actual.ejercicioEditando ?: return
         viewModelScope.launch {
-            try {
-                val dia = actual.dias.find { it.diaNumero == edicion.diaNumero } ?: return@launch
-                val nuevosEjercicios = dia.ejercicios.toMutableList()
-                nuevosEjercicios[edicion.ejercicioIdx] = nuevosEjercicios[edicion.ejercicioIdx].copy(
-                    series = series.coerceIn(1, 6),
-                    repeticiones = repeticiones.ifBlank { "8-12" }
+            if (nuevoGrupo != edicion.grupoMuscular) {
+                // El grupo cambió: cerramos el diálogo, mostramos spinner y buscamos ejercicio nuevo.
+                _estado.value = actual.copy(
+                    ejercicioEditando = null,
+                    sustitucionEnCurso = edicion.diaNumero to edicion.ejercicioIdx
                 )
-                val diaActualizado = dia.copy(ejercicios = nuevosEjercicios)
-                rutinasRepositorio.actualizarDiaRutina(diaActualizado).getOrThrow()
-                val nuevosDias = actual.dias.map { if (it.diaNumero == edicion.diaNumero) diaActualizado else it }
-                Log.d("RutinasViewModel", "Ejercicio editado: '${edicion.nombreEjercicio}' → ${series}×${repeticiones}.")
-                _estado.value = actual.copy(dias = nuevosDias, ejercicioEditando = null)
-            } catch (e: Exception) {
-                Log.e("RutinasViewModel", "Error al guardar la edición del ejercicio: ${e.message}")
-                _estado.value = actual.copy(ejercicioEditando = null)
+                try {
+                    val estadoVivo = _estado.value as? EstadoRutinas.RutinaActiva ?: return@launch
+                    val dia = estadoVivo.dias.find { it.diaNumero == edicion.diaNumero } ?: run {
+                        _estado.value = estadoVivo.copy(sustitucionEnCurso = null); return@launch
+                    }
+                    val ejercicioActual = dia.ejercicios.getOrNull(edicion.ejercicioIdx) ?: run {
+                        _estado.value = estadoVivo.copy(sustitucionEnCurso = null); return@launch
+                    }
+                    val idsEnDia = dia.ejercicios.map { it.ejercicioId }.toSet()
+
+                    val todos = rutinasRepositorio.obtenerEjercicios(
+                        equipos = listOf("Barra", "Mancuernas", "Cable", "Máquina", "Calistenia"),
+                        niveles = listOf("Principiante", "Intermedio", "Avanzado")
+                    ).getOrDefault(emptyList())
+
+                    val candidatos = todos.filter {
+                        it.grupoMuscular == nuevoGrupo && it.id !in idsEnDia
+                    }
+
+                    if (candidatos.isEmpty()) {
+                        Log.d("RutinasViewModel", "Sin candidatos para el grupo '$nuevoGrupo'. Sin cambios.")
+                        _estado.value = estadoVivo.copy(sustitucionEnCurso = null)
+                        return@launch
+                    }
+
+                    val elegido = geminiGenerador.generarSustituto(
+                        ejercicioActual = ejercicioActual.nombre,
+                        grupoMuscular = nuevoGrupo,
+                        candidatos = candidatos
+                    ) ?: candidatos.random()
+
+                    val nuevosEjercicios = dia.ejercicios.toMutableList()
+                    nuevosEjercicios[edicion.ejercicioIdx] = EjercicioEnRutina(
+                        ejercicioId = elegido.id,
+                        nombre = elegido.nombre,
+                        grupoMuscular = elegido.grupoMuscular,
+                        series = series.coerceIn(1, 6),
+                        repeticiones = repeticiones.ifBlank { "8-12" }
+                    )
+                    val diaActualizado = dia.copy(ejercicios = nuevosEjercicios)
+                    rutinasRepositorio.actualizarDiaRutina(diaActualizado).getOrThrow()
+                    val nuevosDias = estadoVivo.dias.map { if (it.diaNumero == edicion.diaNumero) diaActualizado else it }
+                    Log.d("RutinasViewModel", "Grupo cambiado: '${edicion.grupoMuscular}' → '$nuevoGrupo'. Ejercicio: '${elegido.nombre}'. ${series}×${repeticiones}.")
+                    _estado.value = estadoVivo.copy(dias = nuevosDias, sustitucionEnCurso = null)
+                } catch (e: Exception) {
+                    Log.e("RutinasViewModel", "Error al cambiar grupo muscular al guardar: ${e.message}")
+                    val estadoVivo = _estado.value as? EstadoRutinas.RutinaActiva ?: return@launch
+                    _estado.value = estadoVivo.copy(sustitucionEnCurso = null)
+                }
+            } else {
+                // El grupo no cambió: actualizamos solo series y repeticiones.
+                try {
+                    val dia = actual.dias.find { it.diaNumero == edicion.diaNumero } ?: run {
+                        _estado.value = actual.copy(ejercicioEditando = null); return@launch
+                    }
+                    val nuevosEjercicios = dia.ejercicios.toMutableList()
+                    nuevosEjercicios[edicion.ejercicioIdx] = nuevosEjercicios[edicion.ejercicioIdx].copy(
+                        series = series.coerceIn(1, 6),
+                        repeticiones = repeticiones.ifBlank { "8-12" }
+                    )
+                    val diaActualizado = dia.copy(ejercicios = nuevosEjercicios)
+                    rutinasRepositorio.actualizarDiaRutina(diaActualizado).getOrThrow()
+                    val nuevosDias = actual.dias.map { if (it.diaNumero == edicion.diaNumero) diaActualizado else it }
+                    Log.d("RutinasViewModel", "Ejercicio editado: '${edicion.nombreEjercicio}' → ${series}×${repeticiones}.")
+                    _estado.value = actual.copy(dias = nuevosDias, ejercicioEditando = null)
+                } catch (e: Exception) {
+                    Log.e("RutinasViewModel", "Error al guardar la edición del ejercicio: ${e.message}")
+                    _estado.value = actual.copy(ejercicioEditando = null)
+                }
             }
         }
     }
